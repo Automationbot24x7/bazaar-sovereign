@@ -67,7 +67,7 @@ const freeSeat = () => liveSeats.indexOf(null);
 class Game {
   constructor(id, table, seed) {
     this.id = id; this.lastSeen = Date.now();
-    this.running = false; this.speedMs = 2500; this.autoPause = true; this.decision = null; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
+    this.running = false; this.speedMs = 2500; this.autoPause = true; this.decision = null; this.decisionQueue = []; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
     this.scenes = []; this.sceneSeq = 0; this.playerName = null;
     this.seat(table);
     this.reset(seed);
@@ -91,6 +91,7 @@ class Game {
   }
   reset(seed = Math.floor(Math.random() * 1e6)) {
     this.pause();
+    this.decision = null; this.decisionQueue = [];
     this.world = createWorld({ seed, merchants: ROSTER.map(r => ({ ...r, ...(r.player && this.playerName ? { name: this.playerName } : {}) })) });
     openingNews(this.world);
     this.pnlBuffer = {};
@@ -200,6 +201,8 @@ class Game {
     const newRumor = !hadRumor && w.pending;
     const newOrder = openNow > openBefore && w.contracts.find(c => c.status === 'open' && !c.takenBy);
     const fallen = w.merchants.find(m => m.bankrupt && !m.ownedBy && !bankruptBefore.has(m.id) && !m.player);
+    // every key moment of the day is offered, the biggest first (the Magnate's moves), the rest queued behind it
+    const found = [];
     let d = null;
     if (fallen) {
       d = { kind: 'bankrupt', title: `${fallen.name} is bankrupt!`, text: `Their charter can be seized for ${takeoverPrice(w, fallen)} coins (plus working capital to reopen it). ${['dumping', 'monopoly'].includes(w.magnate?.stage) ? `If you don't, ${MAGNATE.name} takes it tomorrow and grows stronger.` : "If you don't, a rival will within three days."}`, actions: [{ label: 'Seize the charter', act: 'takeover', target: fallen.id }, { label: 'Let it go', act: 'resume' }] };
@@ -216,29 +219,40 @@ class Game {
       const hire = e.demand && !me.helpers ? [{ label: `Hire 2 helpers for the feast (${2 * HELPER_WAGE} coins/day)`, act: 'hire', n: 2, days: 4 }] : [];
       d = { kind: 'rumor', title: 'A rumor in the bazaar', text: `“${e.rumor}” ${hint}${e.demand ? ' Crowds will be bigger than one stall can serve.' : ''}`, actions: [...actions, ...hire, { label: 'Ignore it', act: 'resume' }] };
     }
+    if (d) found.push(d);
+    d = null;
     const mg = w.magnate;
-    if (!d && magnateBefore !== 'gone' && mg?.stage === 'gone') {
+    if (magnateBefore !== 'gone' && mg?.stage === 'gone') {
       const sale = mg.charters.map(id => w.merchants.find(m => m.id === id)).filter(t => t && t.bankrupt && !t.ownedBy);
       d = { kind: 'palace', title: `${MAGNATE.name} leaves the bazaar!`, text: `${mg.why === 'bled' ? 'He has lost too much patience in this stubborn bazaar.' : 'The houses won their customers back and broke his monopoly.'} ${sale.length ? `His charters go to a fire sale: ${sale.map(t => `${t.name} (${takeoverPrice(w, t)} coins)`).join(', ')}.` : ''}`,
         actions: [...sale.slice(0, 2).map(t => ({ label: `Seize ${t.name}'s charter`, act: 'takeover', target: t.id })), { label: 'Back to trading', act: 'resume' }] };
-    } else if (!d && magnateBefore === 'dumping' && mg?.stage === 'monopoly') {
+    } else if (magnateBefore === 'dumping' && mg?.stage === 'monopoly') {
       d = { kind: 'bankrupt', title: `${MAGNATE.name} holds a monopoly`, text: `He now controls ${mg.goods.map(x => G[x].name.toLowerCase()).join(' and ')}: he buys up most of the caravans' supply and sets the price. If he still holds it on day ${SEASON_DAYS}, he owns the bazaar and nobody wins. Break it by winning back ${Math.round(MAGNATE.breakShare * 100)}% of those shoppers for ${MAGNATE.breakDays} days: corner the supply, sell below him, keep your goodwill.`,
         actions: [{ label: `Corner ${G[mg.goods[0]].name.toLowerCase()}`, act: 'doctrine', doctrine: { stance: 'corner', focus: mg.goods[0], aggression: 0.85 } }, { label: 'Undercut on everything', act: 'doctrine', doctrine: { stance: 'undercut', focus: null, aggression: 0.7 } }, { label: 'Keep trading', act: 'resume' }] };
-    } else if (!d && magnateBefore === 'coming' && mg?.stage === 'dumping') {
+    } else if (magnateBefore === 'coming' && mg?.stage === 'dumping') {
       const best = [...mg.goods].sort((a, b) => w.prices[b] - w.prices[a])[0];
       d = { kind: 'magnate', title: `${MAGNATE.name} opens his stall`, text: `${MAGNATE.title} sells ${mg.goods.map(x => `${G[x].name.toLowerCase()} at ${magnatePrice(w, x)}`).join(' and ')} coins, below his own cost, to steal every customer. He stays only while it pays. Make it not pay: buy off his carts (up to ${MAGNATE.raidCap} a day, delivered overnight), rally the rivals into a pact, or trade the goods he ignores.`,
         actions: [{ label: 'Rally the rivals', act: 'pacts' }, { label: `Buy ${MAGNATE.raidCap} cheap ${G[best].name.toLowerCase()}`, act: 'raid', good: best }, { label: 'Ignore him for now', act: 'resume' }] };
-    } else if (!d && w.plot && w.plot !== plotBefore && w.plot.target === me.id) {
+    }
+    if (d) found.unshift(d);   // the Magnate's moves come first
+    d = null;
+    if (w.plot && w.plot !== plotBefore && w.plot.target === me.id) {
       const foe = w.merchants.find(m => m.id === w.plot.by);
       d = { kind: 'bankrupt', title: 'Rats!', text: `${foe.name} resents you and was seen with the rat-catcher. Tomorrow night your warehouse could lose a quarter of its most valuable perishable stock. A night watch costs ${WATCH_COST} coins, or make ${foe.name} a fair offer to calm them down.`,
         actions: [{ label: `Hire the night watch (${WATCH_COST} coins)`, act: 'watch' }, { label: `Make ${foe.name} an offer`, act: 'deal', target: foe.id }, { label: 'Take the risk', act: 'resume' }] };
     }
+    if (d) found.push(d);
+    d = null;
     const storm = w.lastStorm?.day === w.day;
-    if (!d && storm && !me.awning) {
+    if (storm && !me.awning) {
       const lost = w.lastStorm.losses[me.id] || 0;
       d = { kind: 'bankrupt', title: 'A sudden storm!', text: `Rain soaked your stock: about ${lost} coins of goods ruined. ${Object.entries(w.lastStorm.losses).filter(([id, v]) => id !== 'you' && v === 0).length ? 'Stalls with an awning lost nothing.' : ''} An awning costs ${AWNING_COST} coins, once.`, actions: [{ label: `Buy an awning (${AWNING_COST} coins)`, act: 'awning' }, { label: 'Take the risk', act: 'resume' }] };
     }
-    if (d && this.autoPause && this.running) { this.decision = { ...d, day: w.day }; this.pause(); }
+    if (d) found.push(d);
+    if (found.length && this.autoPause && this.running) {
+      [this.decision, ...this.decisionQueue] = found.map(x => ({ ...x, day: w.day }));
+      this.pause();
+    }
   }
   scene(id, once = false) {
     if (!id || (once && this.scenes.some(s => s.id === id))) return;
@@ -289,7 +303,13 @@ class Game {
     this.tick();
     this.timer = setTimeout(() => this.loop(), this.speedMs);
   }
-  play() { if (this.world.over) return; this.decision = null; this.running = true; this.loop(); }
+  play() {
+    if (this.world.over) return;
+    // another key moment from the same day is still waiting: show it before the bazaar moves on
+    const next = this.decisionQueue.shift();
+    if (next && next.day === this.world.day) { this.decision = next; return; }
+    this.decisionQueue = []; this.decision = null; this.running = true; this.loop();
+  }
   pause() { this.running = false; clearTimeout(this.timer); }
 
   view() {
