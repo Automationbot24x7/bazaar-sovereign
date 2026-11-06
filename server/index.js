@@ -68,6 +68,7 @@ class Game {
   constructor(id, table, seed) {
     this.id = id; this.lastSeen = Date.now();
     this.running = false; this.speedMs = 2500; this.autoPause = true; this.decision = null; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
+    this.scenes = []; this.sceneSeq = 0;
     this.seat(table);
     this.reset(seed);
   }
@@ -93,6 +94,8 @@ class Game {
     this.world = createWorld({ seed, merchants: ROSTER.map(r => ({ ...r })) });
     openingNews(this.world);
     this.pnlBuffer = {};
+    this.scenes = [];
+    this.scene('opening');
     this.chain.setupMerchants(this.world.merchants, m => this.ownerOf(m)).catch(e => console.error(e));
     for (const m of this.npcs()) this.npcThink(m);
   }
@@ -143,6 +146,11 @@ class Game {
     const magnateBefore = w.magnate?.stage, plotBefore = w.plot;
     const { settlement } = step(w);
     for (const r of settlement) this.pnlBuffer[r.merchant] = (this.pnlBuffer[r.merchant] || 0) + r.pnl;
+    // story scenes at the big moments (the page plays them, skippable)
+    const stage = w.magnate?.stage;
+    if (stage !== magnateBefore) this.scene({ coming: 'rumor', dumping: 'arrival', monopoly: 'monopoly', gone: 'leaves' }[stage]);
+    if ((w.magnateLog || []).some(e => e.kind === 'seize')) this.scene('seized', true);
+    if (w.over) this.scene(w.result?.reason === 'magnate' ? 'wins' : 'end');
     this.mirrorGuild();
     const rats = w.lastRats?.day === w.day && w.lastRats;
     if (rats) {
@@ -175,7 +183,7 @@ class Game {
       for (const m of this.npcs()) lesson(m, `${MAGNATE.name} seized ${t.name}'s charter on day ${w.day}.`, `${MAGNATE.name} took ${t.name}`, 'warn');
     }
     for (const t of w.merchants.filter(m => m.bankrupt && !m.ownedBy && !m.magnateHeld)) {
-      if (t.bankruptDay == null) for (const o of this.npcs()) lesson(o, `Saw ${t.name} go bankrupt on day ${w.day} while playing ${t.doctrine.stance}${t.doctrine.focus ? ' on ' + t.doctrine.focus : ''}.`, `Saw ${t.name} fall`, 'warn');
+      if (!t.fallSeen && (t.fallSeen = true)) for (const o of this.npcs()) lesson(o, `Saw ${t.name} go bankrupt on day ${w.day} while playing ${t.doctrine.stance}${t.doctrine.focus ? ' on ' + t.doctrine.focus : ''}.`, `Saw ${t.name} fall`, 'warn');
       t.bankruptDay ??= w.day;
       if (w.day - t.bankruptDay >= 3) {
         const buyer = this.npcs().filter(m => m.gold > takeoverPrice(w, t) * 2).sort((a, b) => b.gold - a.gold)[0];
@@ -229,6 +237,10 @@ class Game {
       d = { kind: 'bankrupt', title: 'A sudden storm!', text: `Rain soaked your stock: about ${lost} coins of goods ruined. ${Object.entries(w.lastStorm.losses).filter(([id, v]) => id !== 'you' && v === 0).length ? 'Stalls with an awning lost nothing.' : ''} An awning costs ${AWNING_COST} coins, once.`, actions: [{ label: `Buy an awning (${AWNING_COST} coins)`, act: 'awning' }, { label: 'Take the risk', act: 'resume' }] };
     }
     if (d && this.autoPause && this.running) { this.decision = { ...d, day: w.day }; this.pause(); }
+  }
+  scene(id, once = false) {
+    if (!id || (once && this.scenes.some(s => s.id === id))) return;
+    this.scenes.push({ id, seq: ++this.sceneSeq, day: this.world.day });
   }
   // loans and repayments become treasury <-> wallet transfers
   mirrorGuild() {
@@ -304,6 +316,7 @@ class Game {
       })),
       standings: standings(w), over: w.over, result: w.result,
       chainFeed: this.chain.feed.slice(0, 30),
+      scenes: this.scenes,
       me: { gold: Math.round(me.gold), debt: debtOf(w, me), bonds: (me.bonds || []).map(b => ({ day: b.day, owed: bondOwed(w, b) })), canBorrow: canBorrow(w, me), watch: w.plot?.target === me.id && me.watchDay === w.plot.day },
       guild: { bond: GUILD.bond, fee: GUILD.fee, daily: GUILD.daily, maxBonds: GUILD.maxBonds },
       plot: w.plot?.target === me.id ? { by: w.plot.by, byName: w.merchants.find(m => m.id === w.plot.by)?.name, day: w.plot.day, watchCost: WATCH_COST } : null,
@@ -408,7 +421,7 @@ async function makeOffer(g, b) {
 // ---------- http ----------
 const send = (res, code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const body = req => new Promise(r => { let d = ''; req.on('data', c => { d += c; if (d.length > 1e4) req.destroy(); }); req.on('end', () => { try { r(d ? JSON.parse(d) : {}); } catch { r({}); } }); });
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.json': 'application/json' };
 const lastOrder = new Map();
 
 http.createServer(async (req, res) => {
@@ -495,7 +508,7 @@ http.createServer(async (req, res) => {
     const file = join(process.cwd(), 'public', p === '/' ? 'index.html' : p.replace(/\.\./g, ''));
     const data = await readFile(file).catch(() => null);
     if (!data) return send(res, 404, { error: 'not found' });
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': extname(file) === '.webp' ? 'public, max-age=86400' : 'no-cache' });
+    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': ['.webp', '.mp3'].includes(extname(file)) ? 'public, max-age=86400' : 'no-cache' });
     res.end(data);
   } catch (e) {
     if (!/not trading|no longer open|already holds|need|only|Give them|Choose|Name a price|doesn't have|costs|clerks|not selling|does not sell|not dumping|Guild|Nothing is owed|watch|plotting|pact|bankrupt house/i.test(e.message)) console.error(e);

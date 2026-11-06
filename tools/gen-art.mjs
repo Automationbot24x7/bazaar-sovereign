@@ -16,6 +16,7 @@ const JOBS = [
   { name: 'kasim', ratio: '1:1', prompt: `${PORTRAIT} A wiry, fast-talking young market hawker with a red headscarf, mischievous grin, gesturing mid-shout, coins tucked behind his ear. ${STYLE}` },
   { name: 'vey', ratio: '1:1', prompt: `${PORTRAIT} An elegant aristocratic silk merchant woman in layered violet and silver silks, pearl earrings, one raised eyebrow, a bolt of shimmering silk over her shoulder. ${STYLE}` },
   { name: 'ozzo', ratio: '1:1', prompt: `${PORTRAIT} A large, scheming bearded monk-turned-merchant in a blue hooded robe, rings on every finger, narrowed knowing eyes, a secret note half-hidden in his sleeve. ${STYLE}` },
+  { name: 'magnate', ratio: '1:1', prompt: `${PORTRAIT} A sleek, wealthy foreign trading tycoon in his fifties, immaculate black-and-gold brocade coat, heavy gold chain of office, trimmed silver beard, cold polite smile that does not reach his eyes, one hand resting on a small iron strongbox. ${STYLE}` },
   { name: 'saffron', ratio: '1:1', prompt: `Game item icon: a small woven basket overflowing with crimson saffron threads and purple crocus flowers, centered on a plain parchment background, soft shadow. ${STYLE}` },
   { name: 'silk', ratio: '1:1', prompt: `Game item icon: neatly folded bolts of iridescent violet and gold silk with a tassel, centered on a plain parchment background, soft shadow. ${STYLE}` },
   { name: 'tea', ratio: '1:1', prompt: `Game item icon: a burlap sack of dark green tea leaves with a brass scoop, centered on a plain parchment background, soft shadow. ${STYLE}` },

@@ -198,3 +198,15 @@ button.danger { border-color: var(--red); color: #ffcfbf; }
 .goodwill { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); }
 .goodwill i { flex: 1; height: 4px; background: #3a2b1f; border-radius: 4px; overflow: hidden; }
 .goodwill b { display: block; height: 100%; background: #e07a9a; }
+
+/* ---------- v5: story scenes ---------- */
+.scene { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 0 16px 9vh;
+  background: linear-gradient(180deg, #000 0, #000 9vh, rgba(10,6,4,.55) 9vh, rgba(10,6,4,.55) calc(100% - 9vh), #000 calc(100% - 9vh)), url(/art/bazaar.webp) center / cover; animation: fadein .35s ease-out; }
+.scene[hidden] { display: none; }
+.scene-card { width: min(760px, 100%); margin-bottom: 4vh; background: rgba(20,12,8,.92); border: 1px solid var(--gold); border-radius: 18px; padding: 18px 22px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.scene-who { display: flex; align-items: center; gap: 14px; }
+.scene-who b { font-family: Cinzel, serif; font-size: 20px; color: var(--gold); }
+#sceneLine { font-size: 18px; line-height: 1.5; min-height: 3em; margin: 12px 0 14px; color: var(--parch); }
+.scene-ctrl { display: flex; gap: 10px; align-items: center; } .scene-ctrl .grow { flex: 1; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 600px) { #sceneLine { font-size: 16px; } .scene { padding-bottom: 6vh; } }

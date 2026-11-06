@@ -204,7 +204,7 @@ function rivals() {
     </div></article>`).join('');
 }
 
-function render(s) { S = s; header(); palace(); stalls(); goods(); race(); feeds(); end(); if (dealWith && $('#deal').open) dealMeta(); if ($('#rivals').open) rivals(); }
+function render(s) { S = s; header(); palace(); stalls(); goods(); race(); feeds(); end(); if (dealWith && $('#deal').open) dealMeta(); if ($('#rivals').open) rivals(); pumpScenes(); }
 const refresh = () => api('/api/state').then(render).catch(() => {});
 
 // ---------- deal drawer ----------
@@ -367,3 +367,112 @@ function magnate() {
     <div class="mrow"><span class="muted">Pact:</span> ${pact} ${unasked ? '<button class="ghost" data-pact="">Rally them all</button>' : ''}</div>` : ''}
     ${mg.hits.length ? `<div class="hits">${mg.hits.map(h => `<span>${esc(h.by === 'you' ? 'You' : h.name)} <em class="hit">−${h.hurt}</em></span>`).join('')}</div>` : ''}`;
 }
+
+
+// ---------- story scenes and music: voiced, skippable ----------
+const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+let SCENES = null, lastScene = null, sceneQueue = [], scenePlaying = false, userActed = false, resumeAfter = false;
+let soundOn = store.get('bs-sound') !== '0', skipScenes = store.get('bs-skip-scenes') === '1';
+const voice = new Audio(), music = new Audio();
+music.loop = true; music.volume = 0.3;
+fetch('/scenes.json').then(r => r.json()).then(d => { SCENES = d; pumpScenes(); }).catch(() => {});
+$('#sound').textContent = soundOn ? '🔊' : '🔇';
+$('#sceneOff').checked = skipScenes;
+
+function musicFor() {
+  if (!S) return null;
+  if (S.over) return 'finale';
+  return ['dumping', 'monopoly'].includes(S.magnate?.stage) ? 'magnate' : 'bazaar';
+}
+function syncMusic() {
+  const want = soundOn && userActed ? musicFor() : null;
+  if (!want) { music.pause(); return; }
+  const src = `/audio/music/${want}.mp3`;
+  if (!music.src.endsWith(src)) { music.src = src; music.loop = want !== 'finale'; }
+  music.volume = scenePlaying ? 0.1 : 0.3;
+  if (music.paused) music.play().catch(() => {});
+}
+
+// the bazaar waits while a scene plays (even if it was started a moment after the scene began)
+function holdForScene() {
+  if (!scenePlaying || !S?.running) return;
+  resumeAfter = true;
+  api('/api/pause', {}).then(render).catch(() => {});
+}
+
+// called on every render: queue scenes the server announced since we last looked
+function pumpScenes() {
+  holdForScene();
+  if (!S || !SCENES) return;
+  const list = S.scenes || [];
+  if (lastScene === null) {
+    // on (re)load only the opening of a fresh season plays; older scenes are history
+    lastScene = S.day === 0 ? Math.max(0, ...list.filter(s => s.id !== 'opening').map(s => s.seq)) : Math.max(0, ...list.map(s => s.seq));
+  }
+  for (const s of list) if (s.seq > lastScene) { lastScene = s.seq; if (!skipScenes && SCENES.scenes[s.id]) sceneQueue.push(s.id); }
+  syncMusic();
+  if (!scenePlaying && userActed && sceneQueue.length) playScene(sceneQueue.shift());
+}
+
+let advance = null, sceneToken = 0;
+async function playScene(id) {
+  const token = ++sceneToken;
+  scenePlaying = true;
+  resumeAfter = false;
+  holdForScene();
+  $('#scene').hidden = false; $('#scene').dataset.scene = id;
+  syncMusic();
+  const lines = SCENES.scenes[id];
+  for (let i = 0; i < lines.length; i++) {
+    if (token !== sceneToken) return; // skipped
+    const line = lines[i], who = SCENES.cast[line.who], text = line.text.replace(/<[^>]+>\s*/g, '');
+    $('#scenePortrait').style.backgroundImage = who.art ? `url(/art/${who.art}.webp)` : 'url(/art/ruin.webp)';
+    $('#sceneName').textContent = who.name;
+    const p = $('#sceneLine'); p.textContent = '';
+    let shown = 0;
+    const typer = setInterval(() => { shown = Math.min(text.length, shown + 2); p.textContent = text.slice(0, shown); if (shown >= text.length) clearInterval(typer); }, 28);
+    await new Promise(done => {
+      let finished = false;
+      advance = () => { if (finished) return; finished = true; clearInterval(typer); if (token === sceneToken) p.textContent = text; voice.onended = voice.onerror = null; voice.pause(); advance = null; done(); };
+      const later = ms => setTimeout(() => { if (!finished) advance(); }, ms);
+      if (soundOn) {
+        voice.onended = () => later(450);
+        voice.onerror = () => later(1200 + text.length * 45);
+        voice.src = `/audio/lines/${id}-${i + 1}.mp3`;
+        voice.play().catch(() => later(1200 + text.length * 45));
+      } else later(1200 + text.length * 45);
+    });
+  }
+  if (token === sceneToken) finishScene();
+}
+function finishScene() {
+  scenePlaying = false;
+  $('#scene').hidden = true;
+  if (sceneQueue.length && !skipScenes) return playScene(sceneQueue.shift());
+  syncMusic();
+  // carry on where we were, unless a decision is waiting for the player
+  if (resumeAfter && S && !S.decision && !S.over) api('/api/play', {}).then(render).catch(() => {});
+  resumeAfter = false;
+}
+function skipScene() {
+  if (!scenePlaying) return;
+  sceneToken++; // the running scene stops at its next step
+  advance?.();
+  finishScene();
+}
+$('#sceneNext').onclick = () => advance?.();
+$('#sceneSkip').onclick = skipScene;
+$('#sceneOff').onchange = e => { skipScenes = e.target.checked; store.set('bs-skip-scenes', skipScenes ? '1' : '0'); if (skipScenes) { sceneQueue = []; skipScene(); } };
+addEventListener('keydown', e => {
+  if ($('#scene').hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); skipScene(); }
+  else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); advance?.(); }
+});
+$('#sound').onclick = () => {
+  soundOn = !soundOn; store.set('bs-sound', soundOn ? '1' : '0');
+  $('#sound').textContent = soundOn ? '🔊' : '🔇';
+  if (!soundOn) voice.pause();
+  syncMusic();
+};
+// browsers only allow sound after the player interacts with the page
+addEventListener('pointerdown', () => { if (userActed) return; userActed = true; setTimeout(pumpScenes, 50); }, { capture: true });

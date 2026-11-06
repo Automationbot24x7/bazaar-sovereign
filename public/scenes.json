@@ -1,0 +1,59 @@
+{
+  "cast": {
+    "crier":    { "name": "Town Crier", "art": null,       "voice": "Charon",  "style": "a booming town crier announcing to a crowded market, proud and theatrical" },
+    "teodora":  { "name": "Teodora",    "art": "teodora",  "voice": "Gacrux",  "style": "an old, warm, unhurried market woman, wry and wise" },
+    "kasim":    { "name": "Kasim",      "art": "kasim",    "voice": "Fenrir",  "style": "a young, cocky street hawker, fast and loud, grinning" },
+    "vey":      { "name": "Vey",        "art": "vey",      "voice": "Despina", "style": "a languid, haughty aristocrat, amused and a little bored" },
+    "ozzo":     { "name": "Ozzo",       "art": "ozzo",     "voice": "Algenib", "style": "a slow, low, conspiratorial schemer who savours every word" },
+    "baltazar": { "name": "Baltazar",   "art": "magnate",  "voice": "Orus",    "style": "a smooth, rich, quietly menacing tycoon, never raising his voice" }
+  },
+  "scenes": {
+    "opening": [
+      { "who": "crier", "text": "Hear ye! The bazaar is open! Five houses, one season, and the Palace is watching." },
+      { "who": "kasim", "text": "Cheapest stall in town, and the loudest! Morning, Teodora!" },
+      { "who": "teodora", "text": "Shout less, child. Sell more." },
+      { "who": "vey", "text": "Some of us sell silk, darling. Not noise." },
+      { "who": "ozzo", "text": "Every rumor is a door. I intend to walk through all of them." },
+      { "who": "teodora", "text": "And you, newcomer. Treat the shoppers fairly. They remember." }
+    ],
+    "rumor": [
+      { "who": "ozzo", "text": "Caravans outside the gates. Forty camels. Gold on the harnesses." },
+      { "who": "kasim", "text": "Gold on a camel? Who is that rich?" },
+      { "who": "teodora", "text": "Someone who means to buy the bazaar, not trade in it." },
+      { "who": "vey", "text": "Then we shall see whether money can buy taste." }
+    ],
+    "arrival": [
+      { "who": "baltazar", "text": "Good people of the bazaar. I am Baltazar, of the Golden Caravan Company." },
+      { "who": "baltazar", "text": "From today, my prices are the lowest you will ever see. <short pause> I can lose money longer than any of you can stay open." },
+      { "who": "kasim", "text": "He is selling below what we pay the caravans! That is not trade, that is war!" },
+      { "who": "teodora", "text": "Hold on to your customers, child. A man with no friends runs out of patience." }
+    ],
+    "monopoly": [
+      { "who": "baltazar", "text": "Prices have changed. <short pause> Mine are the only prices now." },
+      { "who": "vey", "text": "Vulgar. Effective, but vulgar." },
+      { "who": "ozzo", "text": "A monopoly is a fortress. Fortresses fall when the well runs dry." }
+    ],
+    "seized": [
+      { "who": "baltazar", "text": "A charter, going cheap. I will take it. <short pause> I will take all of them, eventually." },
+      { "who": "teodora", "text": "There goes another house. Who is next?" }
+    ],
+    "leaves": [
+      { "who": "baltazar", "text": "This bazaar is too stubborn to be worth my gold. <sigh> Pack the camels." },
+      { "who": "kasim", "text": "Ha! Go back to wherever rich men come from!" },
+      { "who": "teodora", "text": "Loyal customers, child. Better than any war chest." }
+    ],
+    "wins": [
+      { "who": "baltazar", "text": "Five houses, and not one could stand together. <short pause> The bazaar is mine." },
+      { "who": "crier", "text": "By order of the Golden Caravan Company, the bazaar closes early tonight." }
+    ],
+    "end": [
+      { "who": "crier", "text": "The season is over! The scales are closed and the ledgers sealed." },
+      { "who": "ozzo", "text": "Count your coins tonight. Tomorrow, the rumors start again." }
+    ]
+  },
+  "music": {
+    "bazaar":  { "prompt": "A 2-minute instrumental for a cosy trading game set in an old desert-city spice bazaar at golden hour. Oud, qanun, frame drum and darbuka, light hand claps, warm and bustling but calm enough to play under dialogue. About 96 BPM, D Hijaz flavour, steady groove with no big climax, ending in a way that loops smoothly back to the start. Instrumental only, no vocals." },
+    "magnate": { "prompt": "A 90-second instrumental for a trading game when a ruthless rich tycoon arrives to crush the local merchants. Low strings, deep tombak and dohol pulses, ticking riq, a menacing ney melody, rising tension that stays under dialogue, about 84 BPM, minor key, loops smoothly. Instrumental only, no vocals." },
+    "finale":  { "prompt": "A 45-second instrumental finale for the end of a season in a desert bazaar trading game: triumphant oud and strings with frame drums, warm brass swell, ending on a resolved final chord. Instrumental only, no vocals." }
+  }
+}

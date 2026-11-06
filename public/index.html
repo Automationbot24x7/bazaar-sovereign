@@ -27,6 +27,7 @@
     <div class="controls">
       <button id="play" class="primary">▶ Open the bazaar</button>
       <button id="speed" class="ghost" title="Speed">1×</button>
+      <button id="sound" class="ghost" title="Music and voices">🔊</button>
       <label class="ap" title="Pause at rumors, Palace orders and bankruptcies"><input type="checkbox" id="autoPause" checked /> pause at key moments</label>
       <button id="sim" class="ghost" title="Skip ahead 10 days">⏩ 10 days</button>
       <button id="help" class="ghost" title="Who is who in the bazaar">Rivals</button>
@@ -84,6 +85,19 @@
   <footer class="foot" id="foot"></footer>
 
   <!-- trade with a rival -->
+  <div id="scene" class="scene" hidden aria-live="polite">
+    <div class="scene-card">
+      <div class="scene-who"><div class="portrait big" id="scenePortrait"></div><b id="sceneName"></b></div>
+      <p id="sceneLine"></p>
+      <div class="scene-ctrl">
+        <label class="muted"><input type="checkbox" id="sceneOff" /> skip all scenes</label>
+        <span class="grow"></span>
+        <button class="ghost" id="sceneSkip" title="Esc">Skip scene</button>
+        <button class="primary" id="sceneNext" title="Space">Next ▸</button>
+      </div>
+    </div>
+  </div>
+
   <dialog id="deal">
     <div class="deal-head">
       <div class="portrait big" id="dealPortrait"></div>
