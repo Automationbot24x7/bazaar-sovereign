@@ -7,10 +7,29 @@
       "compiler": "rustc 1.95.0",
       "builder": "cargo-near cargo-near-build 0.11.5"
     },
-    "wasm_hash": "6qs4EoXxReiLBauMFuNknAkZUn5HFD1oqXt47QMmbsCW"
+    "wasm_hash": "4hWquvd6FbFg4LMVGymtLEfoqu4j1r6rkoghKd1Usr3Y"
   },
   "body": {
     "functions": [
+      {
+        "name": "accept_goods",
+        "doc": " Buyer's wallet pays the exact price: goods go to the buyer and NEAR to the seller, atomically.",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "offer_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
       {
         "name": "buy_charter",
         "doc": " Buy a listed charter. The caller (the buyer's merchant wallet) attaches the price;\n the NEAR goes to the treasury and the NFT moves to the caller in the same transaction.",
@@ -34,6 +53,25 @@
                   "string",
                   "null"
                 ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "cancel_goods",
+        "doc": " Seller reclaims goods from an offer nobody accepted.",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "offer_id",
+              "type_schema": {
+                "type": "string"
               }
             }
           ]
@@ -108,6 +146,34 @@
         }
       },
       {
+        "name": "get_offer",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "offer_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/GoodsOffer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
         "name": "get_treasury",
         "kind": "view",
         "result": {
@@ -145,6 +211,15 @@
             }
           ]
         }
+      },
+      {
+        "name": "migrate",
+        "doc": " One-time upgrade from v2 state: keeps every charter, balance and listing and adds the offers map.",
+        "kind": "call",
+        "modifiers": [
+          "init",
+          "private"
+        ]
       },
       {
         "name": "mint_charter",
@@ -817,6 +892,50 @@
         }
       },
       {
+        "name": "offer_goods",
+        "doc": " Seller's wallet locks goods in escrow for a named buyer at a fixed total price (yoctoNEAR).",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "offer_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "buyer_id",
+              "type_schema": {
+                "description": "NEAR Account Identifier.\n\nThis is a unique, syntactically valid, human-readable account identifier on the NEAR network.\n\n[See the crate-level docs for information about validation.](index.html#account-id-rules)\n\nAlso see [Error kind precedence](AccountId#error-kind-precedence).\n\n## Examples\n\n``` use near_account_id::AccountId;\n\nlet alice: AccountId = \"alice.near\".parse().unwrap();\n\nassert!(\"ƒelicia.near\".parse::<AccountId>().is_err()); // (ƒ is not f) ```",
+                "type": "string"
+              }
+            },
+            {
+              "name": "token_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "price",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
+      {
         "name": "sync_goods",
         "doc": " Vizier mirrors trades with suppliers/townsfolk: sets exact balances, minting or burning the difference.",
         "kind": "call",
@@ -1018,6 +1137,36 @@
               "type": "string"
             },
             "amount": {
+              "type": "string"
+            },
+            "token_id": {
+              "type": "string"
+            }
+          }
+        },
+        "GoodsOffer": {
+          "description": "Goods locked in escrow by a seller for one named buyer at a fixed price.",
+          "type": "object",
+          "required": [
+            "amount",
+            "buyer",
+            "price",
+            "seller",
+            "token_id"
+          ],
+          "properties": {
+            "amount": {
+              "type": "string"
+            },
+            "buyer": {
+              "description": "NEAR Account Identifier.\n\nThis is a unique, syntactically valid, human-readable account identifier on the NEAR network.\n\n[See the crate-level docs for information about validation.](index.html#account-id-rules)\n\nAlso see [Error kind precedence](AccountId#error-kind-precedence).\n\n## Examples\n\n``` use near_account_id::AccountId;\n\nlet alice: AccountId = \"alice.near\".parse().unwrap();\n\nassert!(\"ƒelicia.near\".parse::<AccountId>().is_err()); // (ƒ is not f) ```",
+              "type": "string"
+            },
+            "price": {
+              "type": "string"
+            },
+            "seller": {
+              "description": "NEAR Account Identifier.\n\nThis is a unique, syntactically valid, human-readable account identifier on the NEAR network.\n\n[See the crate-level docs for information about validation.](index.html#account-id-rules)\n\nAlso see [Error kind precedence](AccountId#error-kind-precedence).\n\n## Examples\n\n``` use near_account_id::AccountId;\n\nlet alice: AccountId = \"alice.near\".parse().unwrap();\n\nassert!(\"ƒelicia.near\".parse::<AccountId>().is_err()); // (ƒ is not f) ```",
               "type": "string"
             },
             "token_id": {

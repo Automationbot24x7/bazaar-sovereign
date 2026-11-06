@@ -42,6 +42,7 @@ enum StorageKey {
     Goods,
     GoodsSupply,
     Listings,
+    Offers,
 }
 
 pub const GOODS: [&str; 4] = ["saffron", "silk", "tea", "salt"];
@@ -81,6 +82,17 @@ pub struct CharterUpdate {
     pub bankrupt: bool,
 }
 
+/// Goods locked in escrow by a seller for one named buyer at a fixed price.
+#[derive(Clone)]
+#[near(serializers = [borsh, json])]
+pub struct GoodsOffer {
+    pub seller: AccountId,
+    pub buyer: AccountId,
+    pub token_id: String,
+    pub amount: U128,
+    pub price: U128,
+}
+
 #[derive(PanicOnDefault)]
 #[near(contract_state)]
 pub struct Contract {
@@ -93,6 +105,21 @@ pub struct Contract {
     goods: LookupMap<String, u128>,
     goods_supply: LookupMap<String, u128>,
     /// charter token_id -> price in yoctoNEAR
+    listings: LookupMap<TokenId, u128>,
+    /// open escrowed goods offers by id
+    offers: LookupMap<String, GoodsOffer>,
+}
+
+/// State layout of v2 (before escrowed offers), read once by `migrate`.
+#[near(serializers = [borsh])]
+struct ContractV2 {
+    tokens: NonFungibleToken,
+    metadata: LazyOption<NFTContractMetadata>,
+    charters: LookupMap<TokenId, Charter>,
+    day: u32,
+    treasury: AccountId,
+    goods: LookupMap<String, u128>,
+    goods_supply: LookupMap<String, u128>,
     listings: LookupMap<TokenId, u128>,
 }
 
@@ -143,6 +170,25 @@ impl Contract {
             goods: LookupMap::new(StorageKey::Goods),
             goods_supply: LookupMap::new(StorageKey::GoodsSupply),
             listings: LookupMap::new(StorageKey::Listings),
+            offers: LookupMap::new(StorageKey::Offers),
+        }
+    }
+
+    /// One-time upgrade from v2 state: keeps every charter, balance and listing and adds the offers map.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let old: ContractV2 = env::state_read().expect("No v2 state to migrate");
+        Self {
+            tokens: old.tokens,
+            metadata: old.metadata,
+            charters: old.charters,
+            day: old.day,
+            treasury: old.treasury,
+            goods: old.goods,
+            goods_supply: old.goods_supply,
+            listings: old.listings,
+            offers: LookupMap::new(StorageKey::Offers),
         }
     }
 
@@ -307,6 +353,51 @@ impl Contract {
 
     pub fn get_treasury(&self) -> AccountId {
         self.treasury.clone()
+    }
+
+    // ---------- atomic goods deals via escrow ----------
+
+    /// Seller's wallet locks goods in escrow for a named buyer at a fixed total price (yoctoNEAR).
+    #[payable]
+    pub fn offer_goods(&mut self, offer_id: String, buyer_id: AccountId, token_id: String, amount: U128, price: U128) {
+        assert_one_yocto();
+        require!(self.offers.get(&offer_id).is_none(), "Offer id already used");
+        let seller = env::predecessor_account_id();
+        let escrow = env::current_account_id();
+        self.internal_mt_transfer(&seller, &escrow, &token_id, amount.0);
+        self.offers.insert(offer_id.clone(), GoodsOffer { seller: seller.clone(), buyer: buyer_id.clone(), token_id: token_id.clone(), amount, price });
+        event("goods_offered", json!({ "offer_id": offer_id, "seller": seller, "buyer": buyer_id, "token_id": token_id, "amount": amount, "price": price }));
+    }
+
+    /// Buyer's wallet pays the exact price: goods go to the buyer and NEAR to the seller, atomically.
+    #[payable]
+    pub fn accept_goods(&mut self, offer_id: String) {
+        let o = self.offers.get(&offer_id).cloned().expect("No such offer");
+        let buyer = env::predecessor_account_id();
+        require!(buyer == o.buyer, "This offer is for another buyer");
+        require!(env::attached_deposit().as_yoctonear() >= o.price.0, "Attached deposit is below the price");
+        let escrow = env::current_account_id();
+        self.internal_mt_transfer(&escrow, &buyer, &o.token_id, o.amount.0);
+        self.offers.remove(&offer_id);
+        Promise::new(o.seller.clone()).transfer(env::attached_deposit()).detach();
+        mt_event("mt_transfer", json!({ "old_owner_id": o.seller, "new_owner_id": buyer, "token_ids": [o.token_id], "amounts": [o.amount], "memo": format!("deal {}", offer_id) }));
+        event("goods_sold", json!({ "offer_id": offer_id, "seller": o.seller, "buyer": buyer, "price": o.price }));
+    }
+
+    /// Seller reclaims goods from an offer nobody accepted.
+    #[payable]
+    pub fn cancel_goods(&mut self, offer_id: String) {
+        assert_one_yocto();
+        let o = self.offers.get(&offer_id).cloned().expect("No such offer");
+        require!(env::predecessor_account_id() == o.seller, "Only the seller can cancel");
+        let escrow = env::current_account_id();
+        self.internal_mt_transfer(&escrow, &o.seller, &o.token_id, o.amount.0);
+        self.offers.remove(&offer_id);
+        event("goods_offer_cancelled", json!({ "offer_id": offer_id }));
+    }
+
+    pub fn get_offer(&self, offer_id: String) -> Option<GoodsOffer> {
+        self.offers.get(&offer_id).cloned()
     }
 
     // ---------- NEP-245 goods ----------
@@ -519,6 +610,92 @@ mod tests {
         testing_env!(ctx(accounts(0)).build());
         c.sync_goods(vec![GoodsHolding { account_id: accounts(3), token_id: "saffron".into(), amount: U128(2) }]);
         assert_eq!(c.mt_supply("saffron".into()).unwrap().0, 20);
+    }
+
+    fn yocto(who: AccountId, n: u128) {
+        let mut b = ctx(who);
+        b.attached_deposit(NearToken::from_yoctonear(n));
+        testing_env!(b.build());
+    }
+
+    #[test]
+    fn escrow_deal_is_atomic() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "silk".into(), amount: U128(10) }]);
+        // seller's wallet escrows 5 silk for the buyer at 500 yocto
+        yocto(accounts(2), 1);
+        c.offer_goods("d1".into(), accounts(3), "silk".into(), U128(5), U128(500));
+        assert_eq!(c.mt_balance_of(accounts(2), "silk".into()).0, 5);
+        assert!(c.get_offer("d1".into()).is_some());
+        // buyer's wallet pays: goods arrive in the same call
+        yocto(accounts(3), 500);
+        c.accept_goods("d1".into());
+        assert_eq!(c.mt_balance_of(accounts(3), "silk".into()).0, 5);
+        assert!(c.get_offer("d1".into()).is_none());
+        assert_eq!(c.mt_supply("silk".into()).unwrap().0, 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "for another buyer")]
+    fn only_the_named_buyer_can_accept() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "tea".into(), amount: U128(4) }]);
+        yocto(accounts(2), 1);
+        c.offer_goods("d2".into(), accounts(3), "tea".into(), U128(4), U128(100));
+        yocto(accounts(4), 100);
+        c.accept_goods("d2".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "below the price")]
+    fn underpaying_an_offer_fails() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "tea".into(), amount: U128(4) }]);
+        yocto(accounts(2), 1);
+        c.offer_goods("d3".into(), accounts(3), "tea".into(), U128(4), U128(100));
+        yocto(accounts(3), 99);
+        c.accept_goods("d3".into());
+    }
+
+    #[test]
+    fn seller_can_cancel_an_unaccepted_offer() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "salt".into(), amount: U128(6) }]);
+        yocto(accounts(2), 1);
+        c.offer_goods("d4".into(), accounts(3), "salt".into(), U128(6), U128(60));
+        assert_eq!(c.mt_balance_of(accounts(2), "salt".into()).0, 0);
+        c.cancel_goods("d4".into());
+        assert_eq!(c.mt_balance_of(accounts(2), "salt".into()).0, 6);
+    }
+
+    #[test]
+    fn migrate_keeps_v2_state() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "silk".into(), amount: U128(7) }]);
+        // write the state in the v2 layout, as the deployed contract has it
+        let v2 = ContractV2 {
+            tokens: c.tokens,
+            metadata: c.metadata,
+            charters: c.charters,
+            day: 9,
+            treasury: c.treasury,
+            goods: c.goods,
+            goods_supply: c.goods_supply,
+            listings: c.listings,
+        };
+        env::state_write(&v2);
+        drop(v2); // flush cached map writes to storage
+        let mut m = Contract::migrate();
+        assert_eq!(m.day, 9);
+        assert_eq!(m.mt_balance_of(accounts(2), "silk".into()).0, 7);
+        yocto(accounts(2), 1);
+        m.offer_goods("d5".into(), accounts(3), "silk".into(), U128(2), U128(10));
+        assert!(m.get_offer("d5".into()).is_some());
     }
 
     #[test]

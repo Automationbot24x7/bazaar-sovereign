@@ -27,6 +27,13 @@ try {
   console.log('initialised, Vizier =', ROOT, i.transaction.hash);
 } catch (e) {
   console.log('init skipped (already initialised?):', e.message.slice(0, 120));
+  // upgrading over existing state: convert it to the current layout (fails harmlessly if already current)
+  try {
+    const m = await contract.callFunctionRaw({ contractId: CONTRACT, methodName: 'migrate', args: {} });
+    console.log('migrated state', m.transaction.hash);
+  } catch (e2) {
+    console.log('migrate skipped:', e2.message.slice(0, 160));
+  }
 }
 console.log('metadata:', await provider.callFunction({ contractId: CONTRACT, method: 'nft_metadata', args: {}, finality: 'optimistic' }));
 console.log(`\nExplorer: https://testnet.nearblocks.io/address/${CONTRACT}`);
