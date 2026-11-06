@@ -10,11 +10,16 @@
 //    (<slug>.<root>.testnet), which holds the house's working capital in NEAR;
 //  * goods are NEP-245 tokens in those wallets, mirrored from the market by the Vizier;
 //  * profits/losses settle every 5 days as NEAR transfers treasury <-> merchant wallet;
-//  * deals between houses go through escrow: the seller's wallet locks the goods for the buyer
-//    (offer_goods), the buyer's wallet pays and receives them in one transaction (accept_goods);
+//  * every charter NFT has its own vault of NEAR inside the contract; only the charter's current owner
+//    can spend it, so whoever holds the NFT controls the money;
+//  * deals between houses (player <-> AI and AI <-> AI) settle by intents: each side's wallet signs a
+//    NEP-413 message saying what it gives and gets, and a solver submits the matched pair to
+//    execute_intents, which checks both signatures and settles NEAR and goods in one transaction
+//    (the older escrow, offer_goods + accept_goods, is kept for charters the Magnate holds);
 //  * charter sales: the Vizier lists, the buyer's wallet calls buy_charter with the price attached.
 import { Account, JsonRpcProvider, FailoverRpcProvider, KeyPair, actions, nearToYocto, yoctoToNear } from 'near-api-js';
 import { readFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -53,6 +58,21 @@ const fmtNear = gold => (gold * GOLD_TO_NEAR).toFixed(5);
 // escrow calls use well under 10 TGas; 30 TGas reserves about 0.03 NEAR of the caller's balance
 const DEAL_GAS = 30;
 const GAS_RESERVE = '0.04';
+// each charter keeps a small float of NEAR in its own vault to pay for deals
+const VAULT_FLOAT = process.env.VAULT_FLOAT_NEAR || '0.03';
+
+// ---------- NEP-413 signed intents ----------
+// borsh(u32 tag = 2^31 + 413) ++ borsh({ message, nonce[32], recipient, callback_url: None }), sha256, ed25519
+const u32 = n => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+const bstr = str => { const d = Buffer.from(str, 'utf8'); return Buffer.concat([u32(d.length), d]); };
+let signingKey = null;
+function signIntent(intent) {
+  signingKey ||= KeyPair.fromString(KEY);
+  const message = JSON.stringify(intent), nonce = randomBytes(32);
+  const bytes = Buffer.concat([u32(2147484061), bstr(message), nonce, bstr(CONTRACT), Buffer.from([0])]);
+  const { signature } = signingKey.sign(createHash('sha256').update(bytes).digest());
+  return { message, nonce: [...nonce], recipient: CONTRACT, public_key: signingKey.getPublicKey().toString(), signature: [...signature] };
+}
 
 // ---------- signing queues (testnet) ----------
 const queues = new Map();
@@ -104,6 +124,7 @@ export function makeChain(live, table = 0) {
   };
   const walletOf = slug => (live ? `${slug}${sfx}.${ROOT}` : `${slug}.bazaar.near`);
   const magnateWallet = walletOf('magnate');
+  let ownerFn = m => m.wallet;   // who holds each charter right now (set by setupMerchants)
   const send = (from, to, amount) => acct(from).signAndSendTransaction({ receiverId: to, actions: [actions.transfer(amount)], waitUntil: 'INCLUDED' });
   const call = (signer, method, args, { deposit = 0n, gas = 100 } = {}) =>
     acct(signer).callFunctionRaw({ contractId: CONTRACT, methodName: method, args, deposit, gas: TGAS(gas) });
@@ -163,6 +184,7 @@ export function makeChain(live, table = 0) {
     },
 
     async setupMerchants(merchants, ownerOf) {
+      ownerFn = ownerOf;
       for (const m of merchants) { m.wallet = walletOf(m.slug); m.tokenId = `charter-${m.slug}${sfx}`; }
       if (!live) {
         for (const m of merchants) push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, mockHash());
@@ -200,6 +222,21 @@ export function makeChain(live, table = 0) {
         });
       }
       await rebalance(merchants);
+      // each house's wallet registers the key it signs intents with, and its charter keeps a float in its own vault
+      for (const m of merchants) {
+        const who = m.player ? 'Your stall' : `${m.name}'s stall`;
+        enqueue(m.wallet, `intents setup ${m.wallet}`, async () => {
+          const keys = await view('signers_of', { account_id: m.wallet }).catch(() => []);
+          if (!keys.includes(pubKey)) push('intent', `${who} registers the key it signs NEP-413 intents with.`, hashOf(await call(m.wallet, 'register_signer', {}, { gas: 10 })));
+          const vault = BigInt(await view('vault_of', { token_id: m.tokenId }).catch(() => '0'));
+          const want = nearToYocto(VAULT_FLOAT);
+          if (vault < want / 2n) {
+            await ensureFunds(m, 0, '0.05');
+            push('vault', `${m.player ? 'Your' : m.name + "'s"} charter puts ${Number(yoctoToNear(want - vault)).toFixed(3)} NEAR in its own vault: only the charter's owner can spend it.`,
+              hashOf(await call(m.wallet, 'vault_deposit', { token_id: m.tokenId }, { deposit: want - vault, gas: 10 })));
+          }
+        });
+      }
       // the Magnate's wallet holds the charters he seizes
       enqueue(ROOT, 'magnate wallet', async () => {
         if (!(await exists(magnateWallet))) {
@@ -237,10 +274,63 @@ export function makeChain(live, table = 0) {
       }, { gas: 150 }))));
     },
 
+    // goods deal between houses, settled by intents: the seller's wallet signs "N goods out, P NEAR in",
+    // the buyer's wallet signs the mirror image, and a solver submits both to execute_intents, which checks
+    // the NEP-413 signatures, that each signer owns the charter it spends from, and that everything nets to
+    // zero, then moves the NEAR between the two charters' vaults and the goods between their wallets.
+    recordDeal(buyer, seller, good, qty, total, merchants) {
+      const sOwner = ownerFn(seller), bOwner = ownerFn(buyer);
+      // a charter the Magnate holds has no intent key: fall back to the escrow
+      if (live && (sOwner === magnateWallet || bOwner === magnateWallet)) return this.recordDealEscrow(buyer, seller, good, qty, total, merchants);
+      const S_ = seller.player ? 'Your wallet' : `${seller.name}'s wallet`, B_ = buyer.player ? 'your wallet' : `${buyer.name}'s wallet`;
+      const sellText = `${S_} signs an intent: ${qty} ${good} out, ${fmtNear(total)} NEAR in (NEP-413, off-chain).`;
+      const buyText = `${B_[0].toUpperCase() + B_.slice(1)} signs the matching intent: ${fmtNear(total)} NEAR out, ${qty} ${good} in.`;
+      const settleText = `A solver settles both signed intents in one transaction: ${qty} ${good} to ${buyer.player ? 'you' : buyer.name}, ${Math.round(total)} coins into ${seller.player ? 'your' : seller.name + "'s"} charter vault.`;
+      if (!live) { push('intent', sellText, null); push('intent', buyText, null); push('deal', settleText, mockHash()); return; }
+      const price = yocto(total);
+      // the Vizier first mirrors both houses' pre-deal stock so the seller's on-chain balance exists
+      const pre = merchants.filter(m => m === buyer || m === seller).map(m => ({ account_id: m.wallet, token_id: good, amount: String(Math.floor(m.inventory[good] + (m === seller ? qty : -qty))) }));
+      enqueue(ROOT, 'pre-deal sync', () => call(ROOT, 'sync_goods', { holdings: pre }))
+        .then(() => enqueue(bOwner, 'vault top-up', async () => {
+          const vault = BigInt(await view('vault_of', { token_id: buyer.tokenId }).catch(() => '0'));
+          if (vault >= price) return;
+          const add = price - vault + nearToYocto(VAULT_FLOAT);
+          await ensureFunds({ ...buyer, wallet: bOwner }, 0, (Number(yoctoToNear(add)) + 0.05).toFixed(4));
+          push('vault', `${buyer.player ? 'Your' : buyer.name + "'s"} charter vault is topped up to cover the deal.`, hashOf(await call(bOwner, 'vault_deposit', { token_id: buyer.tokenId }, { deposit: add, gas: 10 })));
+        }))
+        .then(() => enqueue(TREASURY, 'settle intents', async () => {
+          const deadline_ms = Date.now() + 15 * 60_000, memo = `${qty} ${good} for ${Math.round(total)} coins`;
+          const sell = signIntent({ signer_id: sOwner, charter: seller.tokenId, deadline_ms, near: price.toString(), goods: { [good]: -qty }, memo });
+          const buy = signIntent({ signer_id: bOwner, charter: buyer.tokenId, deadline_ms, near: (-price).toString(), goods: { [good]: qty }, memo });
+          push('intent', sellText, null); push('intent', buyText, null);
+          push('deal', settleText, hashOf(await call(TREASURY, 'execute_intents', { intents: [sell, buy] }, { gas: 60 })));
+        }));
+    },
+
+    // a fee one house pays another (e.g. to join a pact): two NEAR-only intents, one solver transaction
+    recordFee(payer, payee, amount, why) {
+      const text = `${payer.player ? 'You pay' : payer.name + ' pays'} ${payee.name} ${Math.round(amount)} coins ${why}: two signed intents, settled charter vault to charter vault.`;
+      if (!live) { push('intent', text, mockHash()); return; }
+      const price = yocto(amount), pOwner = ownerFn(payer), qOwner = ownerFn(payee);
+      if (pOwner === magnateWallet || qOwner === magnateWallet) return;
+      enqueue(pOwner, 'vault top-up', async () => {
+        const vault = BigInt(await view('vault_of', { token_id: payer.tokenId }).catch(() => '0'));
+        if (vault >= price) return;
+        const add = price - vault + nearToYocto(VAULT_FLOAT);
+        await ensureFunds({ ...payer, wallet: pOwner }, 0, (Number(yoctoToNear(add)) + 0.05).toFixed(4));
+        await call(pOwner, 'vault_deposit', { token_id: payer.tokenId }, { deposit: add, gas: 10 });
+      }).then(() => enqueue(TREASURY, 'settle fee', async () => {
+        const deadline_ms = Date.now() + 15 * 60_000, memo = why;
+        const a = signIntent({ signer_id: pOwner, charter: payer.tokenId, deadline_ms, near: (-price).toString(), goods: {}, memo });
+        const b = signIntent({ signer_id: qOwner, charter: payee.tokenId, deadline_ms, near: price.toString(), goods: {}, memo });
+        push('intent', text, hashOf(await call(TREASURY, 'execute_intents', { intents: [a, b] }, { gas: 60 })));
+      }));
+    },
+
     // goods deal between houses, settled atomically through the contract's escrow:
     // the seller's wallet locks the goods for this buyer at this price (offer_goods), then the
     // buyer's wallet pays and receives them in one transaction (accept_goods).
-    recordDeal(buyer, seller, good, qty, total, merchants) {
+    recordDealEscrow(buyer, seller, good, qty, total, merchants) {
       const lockText = `${seller.name}'s stall locks ${qty} ${good} in escrow for ${buyer.player ? 'you' : buyer.name}, signed by its own wallet.`;
       const dealText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)} coins (${fmtNear(total)} NEAR) and receive${buyer.player ? '' : 's'} the ${good} in the same transaction.`;
       if (!live) { push('escrow', lockText, mockHash()); push('deal', dealText, mockHash()); return; }

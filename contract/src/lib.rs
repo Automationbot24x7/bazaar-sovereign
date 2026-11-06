@@ -25,12 +25,14 @@ use near_contract_standards::non_fungible_token::metadata::{
 };
 use near_contract_standards::non_fungible_token::{NonFungibleToken, Token, TokenId};
 use near_sdk::collections::LazyOption;
+use near_sdk::borsh::BorshSerialize;
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::LookupMap;
-use near_sdk::{assert_one_yocto, env, near, require, AccountId, BorshStorageKey, NearSchema, NearToken, PanicOnDefault, Promise, PromiseOrValue};
+use near_sdk::{assert_one_yocto, env, near, require, AccountId, BorshStorageKey, CurveType, NearSchema, NearToken, PanicOnDefault, Promise, PromiseOrValue, PublicKey};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 #[derive(BorshStorageKey)]
 #[near]
@@ -45,6 +47,9 @@ enum StorageKey {
     GoodsSupply,
     Listings,
     Offers,
+    Vaults,
+    Signers,
+    Nonces,
 }
 
 pub const GOODS: [&str; 4] = ["saffron", "silk", "tea", "salt"];
@@ -95,6 +100,50 @@ pub struct GoodsOffer {
     pub price: U128,
 }
 
+/// What one party commits to in a deal, signed by the account that owns the charter it spends from.
+/// `near` is a signed yoctoNEAR amount for the charter's vault; `goods` are signed quantities for the
+/// charter wallet's NEP-245 balances. A set of intents settles only if every asset nets to zero.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct IntentPayload {
+    pub signer_id: AccountId,
+    pub charter: TokenId,
+    pub deadline_ms: u64,
+    pub near: String,
+    #[serde(default)]
+    pub goods: HashMap<String, i64>,
+    #[serde(default)]
+    pub memo: Option<String>,
+}
+
+/// A NEP-413 signed message (the standard NEAR wallets use for off-chain signing, and the one NEAR Intents
+/// uses): `message` is the intent JSON, `nonce` 32 random bytes (one use per signer), `recipient` this
+/// contract. The 64-byte ed25519 `signature` covers sha256(borsh(2^31 + 413) ++ borsh(payload)).
+#[derive(Serialize, Deserialize, NearSchema, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct SignedIntent {
+    pub message: String,
+    pub nonce: Vec<u8>,
+    pub recipient: String,
+    pub public_key: String,
+    pub signature: Vec<u8>,
+}
+
+/// NEP-413 payload, borsh-serialized after the tag for signing.
+#[derive(BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
+struct Nep413Payload {
+    message: String,
+    nonce: [u8; 32],
+    recipient: String,
+    callback_url: Option<String>,
+}
+const NEP413_TAG: u32 = 2_147_484_061; // 2^31 + 413
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 #[derive(PanicOnDefault)]
 #[near(contract_state)]
 pub struct Contract {
@@ -110,11 +159,17 @@ pub struct Contract {
     listings: LookupMap<TokenId, u128>,
     /// open escrowed goods offers by id
     offers: LookupMap<String, GoodsOffer>,
+    /// NEAR held by each charter itself (yoctoNEAR): the NFT owns money; whoever owns the NFT controls it
+    vaults: LookupMap<TokenId, u128>,
+    /// ed25519 keys an account registered for signing intents ("ed25519:<base58>")
+    signers: LookupMap<AccountId, Vec<String>>,
+    /// used intent nonces, key = "<signer>|<nonce>"
+    nonces: LookupMap<String, bool>,
 }
 
-/// State layout of v2 (before escrowed offers), read once by `migrate`.
+/// State layout of v3 (escrow, before charter vaults and intents), read once by `migrate`.
 #[near(serializers = [borsh])]
-struct ContractV2 {
+struct ContractV3 {
     tokens: NonFungibleToken,
     metadata: LazyOption<NFTContractMetadata>,
     charters: LookupMap<TokenId, Charter>,
@@ -123,6 +178,7 @@ struct ContractV2 {
     goods: LookupMap<String, u128>,
     goods_supply: LookupMap<String, u128>,
     listings: LookupMap<TokenId, u128>,
+    offers: LookupMap<String, GoodsOffer>,
 }
 
 fn mt_event(kind: &str, data: serde_json::Value) {
@@ -173,14 +229,18 @@ impl Contract {
             goods_supply: LookupMap::new(StorageKey::GoodsSupply),
             listings: LookupMap::new(StorageKey::Listings),
             offers: LookupMap::new(StorageKey::Offers),
+            vaults: LookupMap::new(StorageKey::Vaults),
+            signers: LookupMap::new(StorageKey::Signers),
+            nonces: LookupMap::new(StorageKey::Nonces),
         }
     }
 
-    /// One-time upgrade from v2 state: keeps every charter, balance and listing and adds the offers map.
+    /// One-time upgrade from v3 state: keeps every charter, balance, listing and offer and adds
+    /// charter vaults, intent signers and nonces.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        let old: ContractV2 = env::state_read().expect("No v2 state to migrate");
+        let old: ContractV3 = env::state_read().expect("No v3 state to migrate");
         Self {
             tokens: old.tokens,
             metadata: old.metadata,
@@ -190,7 +250,10 @@ impl Contract {
             goods: old.goods,
             goods_supply: old.goods_supply,
             listings: old.listings,
-            offers: LookupMap::new(StorageKey::Offers),
+            offers: old.offers,
+            vaults: LookupMap::new(StorageKey::Vaults),
+            signers: LookupMap::new(StorageKey::Signers),
+            nonces: LookupMap::new(StorageKey::Nonces),
         }
     }
 
@@ -409,6 +472,138 @@ impl Contract {
 
     pub fn get_offer(&self, offer_id: String) -> Option<GoodsOffer> {
         self.offers.get(&offer_id).cloned()
+    }
+
+    // ---------- charter vaults: the NFT itself holds money ----------
+
+    /// Anyone can put NEAR into a charter's vault (a merchant funding its own business, a patron, a solver).
+    #[payable]
+    pub fn vault_deposit(&mut self, token_id: TokenId) {
+        require!(self.charters.get(&token_id).is_some(), "Unknown charter");
+        let amount = env::attached_deposit().as_yoctonear();
+        require!(amount > 0, "Attach NEAR to deposit");
+        let v = self.vaults.get(&token_id).copied().unwrap_or(0);
+        self.vaults.insert(token_id.clone(), v + amount);
+        event("vault_deposit", json!({ "token_id": token_id, "from": env::predecessor_account_id(), "amount": U128(amount) }));
+    }
+
+    /// Only the charter's current owner can take NEAR out of its vault. Sell or lose the NFT and you lose the money.
+    pub fn vault_withdraw(&mut self, token_id: TokenId, amount: U128) -> Promise {
+        let owner = self.tokens.owner_by_id.get(&token_id).expect("Unknown charter");
+        require!(env::predecessor_account_id() == owner, "Only the charter's owner can withdraw from its vault");
+        let v = self.vaults.get(&token_id).copied().unwrap_or(0);
+        require!(v >= amount.0, "The vault holds less than that");
+        self.vaults.insert(token_id.clone(), v - amount.0);
+        event("vault_withdraw", json!({ "token_id": token_id, "to": owner, "amount": amount }));
+        Promise::new(owner).transfer(NearToken::from_yoctonear(amount.0))
+    }
+
+    pub fn vault_of(&self, token_id: TokenId) -> U128 {
+        U128(self.vaults.get(&token_id).copied().unwrap_or(0))
+    }
+
+    // ---------- intent-based settlement ----------
+
+    /// The calling account registers the access key that signed this transaction as an intent-signing key.
+    /// Calling with the key itself proves the account controls it.
+    pub fn register_signer(&mut self) {
+        let account = env::predecessor_account_id();
+        require!(account == env::signer_account_id(), "Call this directly from the account");
+        let pk = String::from(&env::signer_account_pk());
+        let mut keys = self.signers.get(&account).cloned().unwrap_or_default();
+        if !keys.contains(&pk) {
+            require!(keys.len() < 4, "At most 4 signing keys");
+            keys.push(pk.clone());
+            self.signers.insert(account.clone(), keys);
+            event("signer_registered", json!({ "account_id": account, "public_key": pk }));
+        }
+    }
+
+    pub fn signers_of(&self, account_id: AccountId) -> Vec<String> {
+        self.signers.get(&account_id).cloned().unwrap_or_default()
+    }
+
+    pub fn nonce_used(&self, signer_id: AccountId, nonce: String) -> bool {
+        self.nonces.get(&format!("{}|{}", signer_id, nonce)).is_some()
+    }
+
+    /// Checks one NEP-413 signed intent and returns it with its nonce (hex).
+    fn verify_intent(&self, si: &SignedIntent) -> (IntentPayload, String) {
+        require!(si.recipient == env::current_account_id().to_string(), "Intent is addressed to another contract");
+        let nonce: [u8; 32] = si.nonce.as_slice().try_into().unwrap_or_else(|_| env::panic_str("Nonce must be 32 bytes"));
+        let p: IntentPayload = serde_json::from_str(&si.message).unwrap_or_else(|_| env::panic_str("Intent message is not valid JSON"));
+        let keys = self.signers.get(&p.signer_id).cloned().unwrap_or_default();
+        require!(keys.contains(&si.public_key), "Key is not registered for this signer");
+        let pk = PublicKey::from_str(&si.public_key).unwrap_or_else(|_| env::panic_str("Bad public key"));
+        require!(pk.curve_type() == CurveType::ED25519, "Only ed25519 keys");
+        let pk_bytes: [u8; 32] = pk.as_bytes()[1..].try_into().unwrap_or_else(|_| env::panic_str("Bad public key"));
+        let sig: [u8; 64] = si.signature.as_slice().try_into().unwrap_or_else(|_| env::panic_str("Signature must be 64 bytes"));
+        let mut bytes = near_sdk::borsh::to_vec(&NEP413_TAG).unwrap();
+        bytes.extend(near_sdk::borsh::to_vec(&Nep413Payload { message: si.message.clone(), nonce, recipient: si.recipient.clone(), callback_url: None }).unwrap());
+        require!(env::ed25519_verify(&sig, &env::sha256(&bytes), &pk_bytes), "Bad intent signature");
+        require!(p.deadline_ms >= env::block_timestamp_ms(), "Intent expired");
+        let n = hex(&nonce);
+        require!(self.nonces.get(&format!("{}|{}", p.signer_id, n)).is_none(), "Intent nonce already used");
+        let owner = self.tokens.owner_by_id.get(&p.charter).expect("Unknown charter");
+        require!(owner == p.signer_id, "Signer does not own this charter");
+        (p, n)
+    }
+
+    /// Settles a matched set of signed intents in one transaction. Callable by anyone (a "solver"):
+    /// every signature, deadline, nonce and charter ownership is checked; NEAR and every good must net
+    /// to zero across the set; then each charter's vault and its wallet's goods move by the signed amounts.
+    pub fn execute_intents(&mut self, intents: Vec<SignedIntent>) {
+        require!(intents.len() >= 2 && intents.len() <= 16, "Settle between 2 and 16 intents");
+        let checked: Vec<(IntentPayload, String)> = intents.iter().map(|si| self.verify_intent(si)).collect();
+        let mut near_sum: i128 = 0;
+        let mut goods_sum: HashMap<String, i128> = HashMap::new();
+        let mut seen: Vec<String> = vec![];
+        for (p, nonce) in &checked {
+            let n = format!("{}|{}", p.signer_id, nonce);
+            require!(!seen.contains(&n), "The same intent twice");
+            seen.push(n);
+            near_sum += p.near.parse::<i128>().unwrap_or_else(|_| env::panic_str("Bad NEAR amount"));
+            for (g, q) in &p.goods {
+                assert_good(g);
+                *goods_sum.entry(g.clone()).or_insert(0) += *q as i128;
+            }
+        }
+        require!(near_sum == 0, "NEAR does not net to zero across the intents");
+        require!(goods_sum.values().all(|v| *v == 0), "Goods do not net to zero across the intents");
+        let mut legs = vec![];
+        for (p, nonce) in &checked {
+            self.nonces.insert(format!("{}|{}", p.signer_id, nonce), true);
+            let dn = p.near.parse::<i128>().unwrap();
+            let v = self.vaults.get(&p.charter).copied().unwrap_or(0) as i128 + dn;
+            require!(v >= 0, "A charter's vault cannot go below zero");
+            self.vaults.insert(p.charter.clone(), v as u128);
+            let wallet = self.charters.get(&p.charter).expect("Unknown charter").wallet.clone();
+            for (g, q) in &p.goods {
+                let key = gkey(g, &wallet);
+                let b = self.goods.get(&key).copied().unwrap_or(0) as i128 + *q as i128;
+                require!(b >= 0, "Not enough goods in the charter's wallet");
+                if b == 0 {
+                    self.goods.remove(&key);
+                } else {
+                    self.goods.insert(key, b as u128);
+                }
+            }
+            legs.push(json!({ "signer": p.signer_id, "charter": p.charter, "near": p.near, "goods": p.goods, "memo": p.memo }));
+        }
+        // NEP-245 transfer logs for two-party goods legs, so indexers see the goods move
+        let parsed: Vec<&IntentPayload> = checked.iter().map(|(p, _)| p).collect();
+        if parsed.len() == 2 {
+            for (g, q) in &parsed[0].goods {
+                if *q == 0 {
+                    continue;
+                }
+                let (from, to) = if *q < 0 { (parsed[0], parsed[1]) } else { (parsed[1], parsed[0]) };
+                let fw = self.charters.get(&from.charter).unwrap().wallet.clone();
+                let tw = self.charters.get(&to.charter).unwrap().wallet.clone();
+                mt_event("mt_transfer", json!({ "old_owner_id": fw, "new_owner_id": tw, "token_ids": [g], "amounts": [U128(q.unsigned_abs() as u128)], "memo": "intent settlement" }));
+            }
+        }
+        event("intents_settled", json!({ "solver": env::predecessor_account_id(), "legs": legs }));
     }
 
     // ---------- NEP-245 goods ----------
@@ -703,12 +898,14 @@ mod tests {
     }
 
     #[test]
-    fn migrate_keeps_v2_state() {
+    fn migrate_keeps_v3_state() {
         testing_env!(ctx(accounts(0)).build());
         let mut c = Contract::new(accounts(0), accounts(5));
         c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "silk".into(), amount: U128(7) }]);
-        // write the state in the v2 layout, as the deployed contract has it
-        let v2 = ContractV2 {
+        yocto(accounts(2), 1);
+        c.offer_goods("d0".into(), accounts(3), "silk".into(), U128(1), U128(10));
+        // write the state in the v3 layout, as the deployed contract has it
+        let v3 = ContractV3 {
             tokens: c.tokens,
             metadata: c.metadata,
             charters: c.charters,
@@ -717,15 +914,122 @@ mod tests {
             goods: c.goods,
             goods_supply: c.goods_supply,
             listings: c.listings,
+            offers: c.offers,
         };
-        env::state_write(&v2);
-        drop(v2); // flush cached map writes to storage
-        let mut m = Contract::migrate();
+        env::state_write(&v3);
+        drop(v3); // flush cached map writes to storage
+        testing_env!(ctx(accounts(0)).build());
+        let m = Contract::migrate();
         assert_eq!(m.day, 9);
-        assert_eq!(m.mt_balance_of(accounts(2), "silk".into()).0, 7);
-        yocto(accounts(2), 1);
-        m.offer_goods("d5".into(), accounts(3), "silk".into(), U128(2), U128(10));
-        assert!(m.get_offer("d5".into()).is_some());
+        assert_eq!(m.mt_balance_of(accounts(2), "silk".into()).0, 6);
+        assert!(m.get_offer("d0".into()).is_some());
+        assert_eq!(m.vault_of("charter-x".into()).0, 0);
+    }
+
+    // ---------- charter vaults + NEP-413 signed intents ----------
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn key(seed: u8) -> (SigningKey, String) {
+        let sk = SigningKey::from_bytes(&[seed; 32]);
+        let pk = PublicKey::from_parts(CurveType::ED25519, sk.verifying_key().to_bytes().to_vec()).unwrap();
+        (sk, String::from(&pk))
+    }
+
+    fn register(c: &mut Contract, who: AccountId, pk: &str) {
+        let mut b = ctx(who.clone());
+        b.signer_account_id(who).signer_account_pk(PublicKey::from_str(pk).unwrap());
+        testing_env!(b.build());
+        c.register_signer();
+    }
+
+    fn sign(sk: &SigningKey, pk: &str, msg: &str, nonce: u8) -> SignedIntent {
+        let recipient = env::current_account_id().to_string();
+        let mut bytes = near_sdk::borsh::to_vec(&NEP413_TAG).unwrap();
+        bytes.extend(near_sdk::borsh::to_vec(&Nep413Payload { message: msg.into(), nonce: [nonce; 32], recipient: recipient.clone(), callback_url: None }).unwrap());
+        let sig = sk.sign(&env::sha256(&bytes)).to_bytes().to_vec();
+        SignedIntent { message: msg.into(), nonce: vec![nonce; 32], recipient, public_key: pk.into(), signature: sig }
+    }
+
+    fn intent(signer: &AccountId, charter: &str, near: i128, goods: &str) -> String {
+        format!(r#"{{"signer_id":"{}","charter":"{}","deadline_ms":99999999999999,"near":"{}","goods":{{{}}},"memo":"test"}}"#, signer, charter, near, goods)
+    }
+
+    /// two houses: A sells silk from its wallet, B pays from its charter vault
+    fn market() -> (Contract, (SigningKey, String), (SigningKey, String)) {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.mint_charter("charter-a".into(), accounts(2), "A".into(), accounts(2), "a".into(), None);
+        c.mint_charter("charter-b".into(), accounts(3), "B".into(), accounts(3), "b".into(), None);
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "silk".into(), amount: U128(10) }]);
+        yocto(accounts(3), 1000);
+        c.vault_deposit("charter-b".into());
+        let (ka, kb) = (key(1), key(2));
+        register(&mut c, accounts(2), &ka.1);
+        register(&mut c, accounts(3), &kb.1);
+        (c, ka, kb)
+    }
+
+    #[test]
+    fn signed_intents_settle_a_deal_atomically() {
+        let (mut c, ka, kb) = market();
+        let sell = sign(&ka.0, &ka.1, &intent(&accounts(2), "charter-a", 600, r#""silk":-4"#), 7);
+        let buy = sign(&kb.0, &kb.1, &intent(&accounts(3), "charter-b", -600, r#""silk":4"#), 8);
+        testing_env!(ctx(accounts(4)).build()); // any solver can submit the matched pair
+        c.execute_intents(vec![sell, buy]);
+        assert_eq!(c.vault_of("charter-a".into()).0, 600);
+        assert_eq!(c.vault_of("charter-b".into()).0, 400);
+        assert_eq!(c.mt_balance_of(accounts(2), "silk".into()).0, 6);
+        assert_eq!(c.mt_balance_of(accounts(3), "silk".into()).0, 4);
+        assert!(c.nonce_used(accounts(2), hex(&[7u8; 32])));
+    }
+
+    #[test]
+    #[should_panic(expected = "NEAR does not net to zero")]
+    fn intents_must_balance() {
+        let (mut c, ka, kb) = market();
+        let sell = sign(&ka.0, &ka.1, &intent(&accounts(2), "charter-a", 600, r#""silk":-4"#), 7);
+        let buy = sign(&kb.0, &kb.1, &intent(&accounts(3), "charter-b", -500, r#""silk":4"#), 8);
+        c.execute_intents(vec![sell, buy]);
+    }
+
+    #[test]
+    #[should_panic(expected = "nonce already used")]
+    fn an_intent_cannot_be_replayed() {
+        let (mut c, ka, kb) = market();
+        let sell = sign(&ka.0, &ka.1, &intent(&accounts(2), "charter-a", 100, r#""silk":-1"#), 7);
+        let buy = sign(&kb.0, &kb.1, &intent(&accounts(3), "charter-b", -100, r#""silk":1"#), 8);
+        c.execute_intents(vec![sell.clone(), buy.clone()]);
+        c.execute_intents(vec![sell, buy]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Bad intent signature")]
+    fn a_tampered_intent_is_rejected() {
+        let (mut c, ka, kb) = market();
+        let mut sell = sign(&ka.0, &ka.1, &intent(&accounts(2), "charter-a", 600, r#""silk":-4"#), 7);
+        sell.message = intent(&accounts(2), "charter-a", 600, r#""silk":-1"#); // changed after signing
+        let buy = sign(&kb.0, &kb.1, &intent(&accounts(3), "charter-b", -600, r#""silk":1"#), 8);
+        let buy_fix = SignedIntent { ..buy };
+        c.execute_intents(vec![sell, buy_fix]);
+    }
+
+    #[test]
+    fn the_charters_money_follows_the_nft() {
+        let (mut c, ka, kb) = market();
+        // B's charter is listed and A buys it: from now on A, not B, controls B's vault
+        testing_env!(ctx(accounts(0)).build());
+        c.list_charter("charter-b".into(), U128(10), "agreed buyout".into());
+        yocto(accounts(2), 10);
+        c.buy_charter("charter-b".into(), Some("charter-a".into()));
+        // B's old key can no longer spend from charter-b
+        let spend = sign(&kb.0, &kb.1, &intent(&accounts(3), "charter-b", -100, ""), 9);
+        let take = sign(&ka.0, &ka.1, &intent(&accounts(2), "charter-a", 100, ""), 10);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.execute_intents(vec![spend, take])));
+        assert!(res.is_err());
+        // the new owner withdraws what the charter holds
+        testing_env!(ctx(accounts(2)).build());
+        let _ = c.vault_withdraw("charter-b".into(), U128(1000));
+        assert_eq!(c.vault_of("charter-b".into()).0, 0);
     }
 
     #[test]

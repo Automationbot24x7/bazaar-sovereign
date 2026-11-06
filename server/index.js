@@ -275,6 +275,7 @@ class Game {
       if (pay && prior?.counter) {
         if (me.gold < prior.counter) throw new Error(`You need ${prior.counter} coins`);
         me.gold -= prior.counter; r.gold += prior.counter; me.pnlAdj = (me.pnlAdj || 0) - prior.counter; r.pnlAdj = (r.pnlAdj || 0) + prior.counter;
+        this.chain.recordFee(me, r, prior.counter, `to join the pact against ${MAGNATE.name}`);
         return { r, a: { accept: true, counter: null, bark: 'Paid in full. My carts are yours.' } };
       }
       if (prior && !prior.accept && !prior.counter && prior.day === w.day) return { r, a: prior };
