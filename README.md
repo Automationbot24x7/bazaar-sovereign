@@ -32,7 +32,7 @@ The game server is the contract owner ("the Vizier") and acts as oracle. Every t
 Requires Node.js 22+.
 
 ```bash
-git clone <repo> && cd bazaar-sovereign
+git clone https://github.com/Automationbot24x7/bazaar-sovereign && cd bazaar-sovereign
 npm install
 npm start            # → http://localhost:3000
 ```
