@@ -195,7 +195,7 @@ export function makeChain(live, table = 0) {
             }
             return;
           }
-          const r = await call(ROOT, 'mint_charter', { token_id: m.tokenId, owner_id: ownerOf(m), name: m.name, wallet: m.wallet, persona: m.persona, media: `${PUBLIC_URL}/art/${m.art || m.slug}.webp` }, { deposit: nearToYocto('0.02') });
+          const r = await call(ROOT, 'mint_charter', { token_id: m.tokenId, owner_id: ownerOf(m), name: m.player ? 'Your House' : m.name, wallet: m.wallet, persona: m.persona, media: `${PUBLIC_URL}/art/${m.art || m.slug}.webp` }, { deposit: nearToYocto('0.02') });
           push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, hashOf(r));
         });
       }

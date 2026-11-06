@@ -68,7 +68,7 @@ class Game {
   constructor(id, table, seed) {
     this.id = id; this.lastSeen = Date.now();
     this.running = false; this.speedMs = 2500; this.autoPause = true; this.decision = null; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
-    this.scenes = []; this.sceneSeq = 0;
+    this.scenes = []; this.sceneSeq = 0; this.playerName = null;
     this.seat(table);
     this.reset(seed);
   }
@@ -91,7 +91,7 @@ class Game {
   }
   reset(seed = Math.floor(Math.random() * 1e6)) {
     this.pause();
-    this.world = createWorld({ seed, merchants: ROSTER.map(r => ({ ...r })) });
+    this.world = createWorld({ seed, merchants: ROSTER.map(r => ({ ...r, ...(r.player && this.playerName ? { name: this.playerName } : {}) })) });
     openingNews(this.world);
     this.pnlBuffer = {};
     this.scenes = [];
@@ -298,7 +298,7 @@ class Game {
       liveBusy: !this.live && LIVE_TABLES > 0 && freeSeat() < 0,
       chain: this.chain.info(),
       goods: GOODS.map(g => ({ ...g, price: w.prices[g.id], history: w.history[g.id].slice(-60) })),
-      events: w.active.map(e => ({ text: e.text, left: e.left })),
+      events: w.active.map(e => ({ id: e.id, text: e.text, left: e.left })),
       rumor: w.pending?.rumor || null,
       contracts: w.contracts.slice(0, 6).map(c => ({ ...c, takenByName: c.takenBy ? w.merchants.find(m => m.id === c.takenBy)?.name : null, deliveredByName: c.deliveredBy ? w.merchants.find(m => m.id === c.deliveredBy)?.name : null, progress: c.takenBy ? Math.min(c.qty, w.merchants.find(m => m.id === c.takenBy).inventory[c.good]) : null })),
       news: w.news.slice(0, 30),
@@ -385,6 +385,17 @@ function gameFor(req, res) {
   return g;
 }
 
+// ---------- the player's house name ----------
+// Shown on the board and read by the rivals' minds, so it is kept short and plain: letters, spaces, ' & and -.
+const TAKEN_NAMES = [...ROSTER.filter(r => !r.player).map(r => r.name), MAGNATE.name, 'Magnate', 'Vizier', 'Golden Caravan'];
+function houseName(raw) {
+  const n = String(raw ?? '').normalize('NFC').replace(/[^\p{L}\p{M} '&-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 24).trim();
+  if (n.replace(/[^\p{L}]/gu, '').length < 2) throw new Error('Give your house a name of at least two letters');
+  const words = ` ${n.toLowerCase().replace(/[^\p{L}]+/gu, ' ')} `; // whole words only: "Harvey" is fine, "Vey" is taken
+  if (TAKEN_NAMES.some(x => words.includes(` ${x.toLowerCase()} `))) throw new Error('That name already belongs to someone in the bazaar');
+  return n;
+}
+
 // ---------- offers ----------
 const lastOffer = new Map();
 async function makeOffer(g, b) {
@@ -458,6 +469,7 @@ http.createServer(async (req, res) => {
       const b = await body(req);
       const w = g.world, me = g.me();
       switch (p) {
+        case '/api/name': { g.playerName = houseName(b.name); me.name = g.playerName; return send(res, 200, g.view()); }
         case '/api/play': g.play(); return send(res, 200, g.view());
         case '/api/pause': g.pause(); return send(res, 200, g.view());
         case '/api/speed': g.speedMs = Math.max(400, Math.min(5000, Number(b.ms) || 2500)); return send(res, 200, g.view());

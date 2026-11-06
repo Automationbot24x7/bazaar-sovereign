@@ -235,3 +235,23 @@ button.danger { border-color: var(--red); color: #ffcfbf; }
 @media (prefers-reduced-motion: reduce) { .stage { animation: none; } .fx-float { display: none; } }
 .scene-card { animation: card-up .45s cubic-bezier(.2,.8,.2,1); } @keyframes card-up { from { opacity: 0; transform: translateY(24px); } }
 .fx-speak { animation: fx-speak .4s cubic-bezier(.2,.8,.2,1); } @keyframes fx-speak { from { transform: scale(.82) rotate(-3deg); opacity: .4; } }
+
+/* ---------- v7: the house name ---------- */
+.name-form { display: grid; gap: 8px; padding-bottom: 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+.name-form label { font-family: Cinzel, serif; font-size: 16px; color: var(--parch); }
+.name-row { display: flex; gap: 8px; }
+.name-row input { flex: 1; min-width: 0; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--gold); background: #1d1510; color: var(--ink); font-size: 17px; font-family: Cinzel, Georgia, serif; }
+.name-row input:focus { outline: 2px solid rgba(240,189,69,.45); outline-offset: 1px; }
+#nameNote.err { color: #ffb4a3; }
+#intro > .primary { display: block; margin: 14px auto 0; padding: 10px 26px; font-size: 15px; }
+.rename { padding: 0 7px; font-size: 12px; vertical-align: middle; border-color: transparent; color: var(--muted); }
+.rename:hover { border-color: var(--line); color: var(--gold); }
+
+/* ---------- v7: the living bazaar (public/ambient.js paints the backdrop on a canvas) ---------- */
+.stage .ambient { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.stage.alive { background: var(--bg); animation: none; }
+.stage { min-height: 460px; }
+
+.fx-coin, .fx-good { position: fixed; left: 0; top: 0; margin: -9px 0 0 -9px; pointer-events: none; will-change: transform, opacity; }
+.fx-coin { width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff5c4 0 18%, #f6c445 40%, #b9800f 100%); box-shadow: 0 0 0 1px #8a5a06, 0 2px 6px rgba(0,0,0,.55), 0 0 12px rgba(255,200,80,.45); }
+.fx-good { width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 9px; border: 2px solid var(--gold); box-shadow: 0 4px 14px rgba(0,0,0,.6); }

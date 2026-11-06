@@ -141,6 +141,8 @@ A bankrupt house's charter can be bought by a solvent rival. The buyer pays the 
 ## 9. Voice
 Your "bark" is heard by the whole bazaar: vivid, short, in character, never more than 14 words. Taunts, boasts, sales pitches and laments are all welcome. Never mention game mechanics, numbers like "aggression 0.8", the codex, or that you are an AI. Your "thought" is private, one sentence, plain reasoning.`;
 
+// the player's house name is chosen by the player: quote it so it reads as a label, never as an instruction
+const houseOf = p => `The player's house (named ${JSON.stringify(String(p.name))})`;
 const ALWAYS_TOOL = '\n\nRespond ONLY by calling the tool named in the request exactly once. Do not write any other text.';
 const system = role => [
   { type: 'text', text: CODEX, cache_control: { type: 'ephemeral' } }, // shared cached prefix
@@ -254,8 +256,8 @@ export async function answerOffer(w, rival, player, offer) {
   const model = rival.model || DEFAULT_MODEL;
   const value = Math.round(netWorth(w, rival));
   const desc = offer.kind === 'buyout'
-    ? `${player.name} offers to buy your entire house (charter, stock and till) for ${offer.price} gold in total. Your net worth is about ${value} gold. If you accept you retire from the bazaar for good.`
-    : `${player.name} offers to buy ${offer.qty} ${offer.good} from you at ${offer.price} gold each (${Math.round(offer.qty * offer.price)} total). The market price is ${w.prices[offer.good]}.`;
+    ? `${houseOf(player)} offers to buy your entire house (charter, stock and till) for ${offer.price} gold in total. Your net worth is about ${value} gold. If you accept you retire from the bazaar for good.`
+    : `${houseOf(player)} offers to buy ${offer.qty} ${offer.good} from you at ${offer.price} gold each (${Math.round(offer.qty * offer.price)} total). The market price is ${w.prices[offer.good]}.`;
   const need = w.contracts.find(c => c.status === 'open' && c.takenBy === player.id);
   const history = ` Your attitude to the player is ${rival.relation || 0} on a -3 (hostile) to +3 (friendly) scale.${need ? ` The player has claimed the Palace order for ${need.qty} ${need.good} due day ${need.due}; selling them ${need.good} helps them win it.` : ''}`;
   if (aiOn() && !rival._offline) {
@@ -279,7 +281,7 @@ export async function answerOffer(w, rival, player, offer) {
 export async function answerPact(w, rival, player) {
   const model = rival.model || DEFAULT_MODEL, mg = w.magnate;
   const goods = mg.goods.join(' and ');
-  const desc = `${player.name} proposes a pact against ${MAGNATE.title}, who is selling ${goods} below cost to drive the houses out. Allies buy off his carts every day (up to ${MAGNATE.raidCap} units at about half the base price), which costs you coins now but stocks your warehouse cheaply and makes him lose patience and leave sooner. Joining ties your house to the player's. He has lost ${Math.round(mg.loss)} of the ~${MAGNATE.patience} coins he will swallow. Your attitude to the player is ${rival.relation || 0} (-3 hostile to +3 friendly). Accept, refuse, or name a fee in coins (counter_price) that the player must pay you to join.`;
+  const desc = `${houseOf(player)} proposes a pact against ${MAGNATE.title}, who is selling ${goods} below cost to drive the houses out. Allies buy off his carts every day (up to ${MAGNATE.raidCap} units at about half the base price), which costs you coins now but stocks your warehouse cheaply and makes him lose patience and leave sooner. Joining ties your house to the player's. He has lost ${Math.round(mg.loss)} of the ~${MAGNATE.patience} coins he will swallow. Your attitude to the player is ${rival.relation || 0} (-3 hostile to +3 friendly). Accept, refuse, or name a fee in coins (counter_price) that the player must pay you to join.`;
   if (aiOn() && !rival._offline) {
     const role = `## Your role\nYou are **${rival.name}**. Personality: ${rival.persona}\nAnswer the player's proposal in character with respond_to_offer (counter_qty: null).`;
     try {

@@ -4,3 +4,4 @@ art-src
 Credentials/
 *.key
 .ai-spend.json
+.claude/

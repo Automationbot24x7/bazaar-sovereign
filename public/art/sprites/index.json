@@ -1,0 +1,68 @@
+{
+ "camels": [
+  {
+   "src": "/art/sprites/camels-1.webp",
+   "w": 251,
+   "h": 208
+  },
+  {
+   "src": "/art/sprites/camels-2.webp",
+   "w": 237,
+   "h": 260
+  },
+  {
+   "src": "/art/sprites/camels-3.webp",
+   "w": 93,
+   "h": 161
+  }
+ ],
+ "magnate": [
+  {
+   "src": "/art/sprites/magnate-1.webp",
+   "w": 511,
+   "h": 260
+  },
+  {
+   "src": "/art/sprites/magnate-2.webp",
+   "w": 85,
+   "h": 180
+  },
+  {
+   "src": "/art/sprites/magnate-3.webp",
+   "w": 199,
+   "h": 155
+  }
+ ],
+ "townsfolk": [
+  {
+   "src": "/art/sprites/townsfolk-1.webp",
+   "w": 98,
+   "h": 220
+  },
+  {
+   "src": "/art/sprites/townsfolk-2.webp",
+   "w": 90,
+   "h": 213
+  },
+  {
+   "src": "/art/sprites/townsfolk-3.webp",
+   "w": 98,
+   "h": 209
+  },
+  {
+   "src": "/art/sprites/townsfolk-4.webp",
+   "w": 52,
+   "h": 125
+  },
+  {
+   "src": "/art/sprites/townsfolk-5.webp",
+   "w": 98,
+   "h": 210
+  },
+  {
+   "src": "/art/sprites/townsfolk-6.webp",
+   "w": 99,
+   "h": 220
+  }
+ ]
+}

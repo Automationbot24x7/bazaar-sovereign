@@ -63,7 +63,7 @@ export function openingNews(w) {
 
 export const TRIBUTE = 0.2; // a vassal stall sends this share of each day's profit to its owner
 export const trading = m => !m.bankrupt; // vassal stalls keep trading under their owner
-export const log = (w, text, kind = 'info') => { w.news.unshift({ day: w.day, text, kind }); w.news.length = Math.min(w.news.length, 60); };
+export const log = (w, text, kind = 'info', extra = null) => { w.news.unshift({ day: w.day, text, kind, ...extra }); w.news.length = Math.min(w.news.length, 60); };
 
 export function netWorth(w, m) {
   return m.gold + GOODS.reduce((t, g) => t + m.inventory[g.id] * w.prices[g.id] * 0.8, 0) - debtOf(w, m);
@@ -421,7 +421,7 @@ export function executeDeal(w, buyer, seller, good, qty, price) {
   buyer.gold -= total; seller.gold += total;
   buyer.cost[good] = (buyer.cost[good] * buyer.inventory[good] + price * qty) / (buyer.inventory[good] + qty);
   buyer.inventory[good] += qty; seller.inventory[good] -= qty;
-  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price} coins each.`, 'deal');
+  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price} coins each.`, 'deal', { from: seller.id, to: buyer.id, good });
   return total;
 }
 
@@ -453,7 +453,7 @@ export function backroomDeals(w, relationToPlayer) {
     buyer.cost[good] = (buyer.cost[good] * buyer.inventory[good] + price * qty) / (buyer.inventory[good] + qty);
     buyer.inventory[good] += qty; seller.inventory[good] -= qty;
     seller.bark = bark;
-    log(w, `${seller.name} sold ${qty} ${G[good].name} to ${buyer.name}${reason === 'spite' ? ' — to keep it out of your hands' : ' to help fill a Palace order'}.`, 'deal');
+    log(w, `${seller.name} sold ${qty} ${G[good].name} to ${buyer.name}${reason === 'spite' ? ' — to keep it out of your hands' : ' to help fill a Palace order'}.`, 'deal', { from: seller.id, to: buyer.id, good });
     deals.push({ buyer, seller, good, qty, total, reason });
     return true;
   };

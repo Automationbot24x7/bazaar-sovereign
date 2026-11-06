@@ -53,7 +53,7 @@
     </section>
 
     <section class="panel house">
-      <h2>Your House <small id="houseCharter"></small></h2>
+      <h2><span id="houseTitle">Your House</span> <button type="button" class="ghost rename" id="rename" title="Rename your house">✎</button> <small id="houseCharter"></small></h2>
       <form id="orderForm" class="order">
         <input id="order" autocomplete="off" maxlength="300" placeholder="Give your factor an order… e.g. “Drought is coming — corner the saffron”" />
         <button class="primary" id="orderBtn">Send</button>
@@ -128,7 +128,15 @@
   </dialog>
 
   <dialog id="intro">
-    <h2>Welcome to the bazaar</h2>
+    <form id="nameForm" class="name-form">
+      <h2>Welcome to the bazaar</h2>
+      <label for="houseName">First, name your house</label>
+      <div class="name-row">
+        <input id="houseName" maxlength="24" autocomplete="off" spellcheck="false" placeholder="e.g. House of Amber Lanterns" required />
+        <button type="button" class="ghost" id="nameDice" title="Suggest a name">🎲</button>
+      </div>
+      <div class="muted" id="nameNote">Rivals will know you by it, and it hangs over your stall. Letters only, up to 24.</div>
+    </form>
     <p>You inherit a merchant charter: an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you for 24 days. Money is counted in coins.</p>
     <ul>
       <li><b>Rumors</b> warn of droughts, caravans and festivals a day early. Corner a market before it moves.</li>
@@ -138,7 +146,7 @@
     </ul>
     <p><b>Win:</b> be the richest house (vassals included) on day 24 — or hold <b>three charters</b> and be crowned Sovereign at once.</p>
     <p class="muted">Every 5 days profits, stock and charters settle on NEAR. You never need a wallet to play.</p>
-    <form method="dialog"><button class="primary">Enter the bazaar</button></form>
+    <button class="primary" form="nameForm">Enter the bazaar</button>
   </dialog>
 
   <dialog id="rivals">
@@ -159,5 +167,6 @@
   </dialog>
 
   <script src="/game.js"></script>
+  <script src="/ambient.js"></script>
 </body>
 </html>

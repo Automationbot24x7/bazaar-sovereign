@@ -134,6 +134,7 @@ function header() {
   $('#play').disabled = S.over; $('#sim').disabled = S.over;
   const me = S.merchants.find(m => m.player);
   $('#houseCharter').textContent = `· ${dh(me.gold)} in the till`;
+  if ($('#houseTitle').textContent !== me.name) $('#houseTitle').textContent = me.name;
   document.querySelectorAll('#stances button').forEach(btn => btn.classList.toggle('on', btn.dataset.s === me.doctrine.stance));
   if (document.activeElement !== $('#focus')) $('#focus').value = me.doctrine.focus || '';
   if (document.activeElement !== $('#aggr')) $('#aggr').value = me.doctrine.aggression;
@@ -210,7 +211,7 @@ function rivals() {
     </div></article>`).join('');
 }
 
-function render(s) { S = s; header(); palace(); stalls(); goods(); race(); feeds(); end(); if (dealWith && $('#deal').open) dealMeta(); if ($('#rivals').open) rivals(); pumpScenes(); motion(); }
+function render(s) { S = s; header(); palace(); stalls(); goods(); race(); feeds(); end(); if (dealWith && $('#deal').open) dealMeta(); if ($('#rivals').open) rivals(); pumpScenes(); motion(); syncName(); }
 const refresh = () => api('/api/state').then(render).catch(() => {});
 
 // ---------- deal drawer ----------
@@ -321,7 +322,33 @@ $('#orderForm').onsubmit = async e => {
   btn.disabled = false; btn.textContent = 'Send';
 };
 
-try { if (!localStorage.getItem('bs-intro-2')) { $('#intro').showModal(); localStorage.setItem('bs-intro-2', '1'); } } catch { $('#intro').showModal(); }
+// ---------- your house's name: the first thing a new player does ----------
+const NAME_KEY = 'bs-name';
+const savedName = () => { try { return localStorage.getItem(NAME_KEY) || ''; } catch { return ''; } };
+const NAME_IDEAS = ['House of Amber Lanterns', 'The Copper Kettle', 'Silk Road Sisters', 'House of the Blue Door', 'The Lucky Camel', 'Dune & Daughters', 'House of Seven Spices', 'The Night Market', 'Rose Water Traders', 'The Brass Scale', 'House of the Last Oasis', 'Moonlit Caravan'];
+let nameSynced = '';
+function syncName() { // the server forgets games on restart: re-send the saved name when the board shows another
+  const want = savedName(), me = S?.merchants.find(m => m.player);
+  if (!want || !me || me.name === want || nameSynced === `${gameId}:${want}`) return;
+  nameSynced = `${gameId}:${want}`;
+  api('/api/name', { name: want }).then(render).catch(() => {});
+}
+$('#nameDice').onclick = () => { const cur = $('#houseName').value, opts = NAME_IDEAS.filter(n => n !== cur); $('#houseName').value = opts[Math.floor(Math.random() * opts.length)]; $('#houseName').focus(); };
+$('#nameForm').onsubmit = async e => {
+  e.preventDefault();
+  const note = $('#nameNote');
+  try {
+    const r = await api('/api/name', { name: $('#houseName').value });
+    const name = r.merchants.find(m => m.player).name;
+    try { localStorage.setItem(NAME_KEY, name); } catch {}
+    nameSynced = `${gameId}:${name}`;
+    render(r); $('#intro').close();
+    pulse(document.querySelector('.stall.me'), 'fx-crown');
+  } catch (err) { note.textContent = err.message; note.classList.add('err'); $('#houseName').focus(); }
+};
+$('#houseName').oninput = () => $('#nameNote').classList.remove('err');
+$('#rename').onclick = () => { const me = S?.merchants.find(m => m.player); $('#houseName').value = me && me.name !== 'Your House' ? me.name : ''; $('#intro').showModal(); };
+if (!savedName()) $('#intro').showModal(); else $('#houseName').value = savedName();
 refresh();
 setInterval(refresh, 800);
 addEventListener('resize', () => S && render(S));
@@ -503,8 +530,47 @@ function pulse(el, cls) {
   if (!el || reduceMotion) return;
   el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
 }
+// coins and goods flying between stalls: deals, daily takings and carts bought off the Magnate
+function flyTo(from, to, make, n = 1, spread = 90) {
+  if (!from || !to || reduceMotion) return;
+  const a = from.getBoundingClientRect ? from.getBoundingClientRect() : from, b = to.getBoundingClientRect();
+  if ((a.bottom < 0 && b.bottom < 0) || (a.top > innerHeight && b.top > innerHeight)) return;
+  for (let i = 0; i < n; i++) {
+    const el = make(); fxLayer.appendChild(el);
+    const x0 = a.left + a.width / 2 + (Math.random() - 0.5) * a.width * 0.4, y0 = a.top + a.height * 0.3;
+    const x1 = b.left + b.width / 2 + (Math.random() - 0.5) * 30, y1 = b.top + Math.min(40, b.height * 0.3);
+    const lift = Math.min(160, 60 + Math.abs(x1 - x0) * 0.25);
+    const mx = (x0 + x1) / 2, my = Math.min(y0, y1) - lift;
+    const anim = el.animate([
+      { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
+      { transform: `translate(${(x0 + mx) / 2}px, ${(y0 + my) / 2 - lift * 0.2}px) scale(1.1)`, opacity: 1, offset: 0.3 },
+      { transform: `translate(${mx}px, ${my}px) scale(1)`, opacity: 1, offset: 0.55 },
+      { transform: `translate(${x1}px, ${y1}px) scale(.8)`, opacity: 0.9 },
+    ], { duration: 950 + Math.random() * 250, delay: i * spread, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'backwards' });
+    anim.onfinish = () => { el.remove(); pulse(to, 'fx-tick'); };
+  }
+}
+const coin = () => Object.assign(document.createElement('div'), { className: 'fx-coin' });
+const crate = good => () => { const el = document.createElement('img'); el.className = 'fx-good'; el.src = `/art/${good}.webp`; el.alt = ''; return el; };
+const stallEl = id => document.querySelector(`.stall[data-id="${id}"]`);
+let tradeSeen = null, hitSeen = null;
+function trades() {
+  const fresh = [];
+  const keys = S.news.map(n => `${n.day}|${n.text}`);
+  if (tradeSeen) S.news.forEach((n, i) => { if (!tradeSeen.has(keys[i]) && n.kind === 'deal' && n.from && n.to) fresh.push(n); });
+  tradeSeen = new Set(keys);
+  fresh.slice(0, 4).forEach((n, k) => setTimeout(() => {
+    flyTo(stallEl(n.to)?.querySelector('.portrait'), stallEl(n.from)?.querySelector('.nw'), coin, 5, 70);          // the buyer pays
+    flyTo(stallEl(n.from)?.querySelector('.portrait'), stallEl(n.to)?.querySelector('.portrait'), crate(n.good), 2, 160); // the goods go the other way
+  }, k * 500));
+  const hits = (S.magnate?.hits || []).map(h => `${h.day}|${h.by}|${h.good}|${h.qty}`);
+  if (hitSeen) (S.magnate?.hits || []).forEach((h, i) => { if (!hitSeen.has(hits[i])) flyTo(document.querySelector('#magnate'), stallEl(h.by)?.querySelector('.portrait'), crate(h.good), Math.min(4, Math.ceil(h.qty / 2)), 120); });
+  hitSeen = new Set(hits);
+}
+
 function motion() {
   if (!S) return;
+  trades();
   const now = {
     day: S.day,
     pnl: Object.fromEntries(S.merchants.map(m => [m.id, m.lastPnl])),
@@ -520,6 +586,13 @@ function motion() {
         const v = Math.round(m.lastPnl);
         if (!v || !m.trading) continue;
         floatAt(document.querySelector(`.stall[data-id="${m.id}"] .nw`), `${v > 0 ? '+' : '−'}${Math.abs(v)}`, v > 0 ? 'up' : 'down');
+        // the day's takings: shoppers' coins drop in from the street
+        const card = stallEl(m.id), stage = document.querySelector('.stage');
+        if (v > 0 && card && stage) {
+          const c = card.getBoundingClientRect(), st = stage.getBoundingClientRect();
+          const street = { left: c.left, width: c.width, top: st.top + (c.top - st.top) * 0.55, height: 40, bottom: c.top };
+          flyTo(street, card.querySelector('.nw'), coin, Math.min(6, Math.ceil(v / 15)), 60);
+        }
       }
       // the Magnate's day: red when it cost him patience, green when his monopoly refilled it
       if (['dumping', 'monopoly'].includes(now.stage) && S.magnate.lastLoss) {
