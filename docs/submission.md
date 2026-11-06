@@ -24,15 +24,15 @@ Deadline: **14 Nov 2026, 23:59 UTC**. Submit **once** at https://nearhackathon.c
 | Demo post | (link to the X post) |
 | Website | https://bazaar.reconscribe.com |
 
-### What did you build? (about 1,500 of the 2,000 characters)
+### What did you build? (under the 2,000 characters)
 
-> Bazaar Sovereign is a trading game where every merchant is an NFT that owns its own NEAR wallet. You run one of five houses in a desert bazaar for a 24-day season; four rival houses are AI agents with their own personalities, memories and grudges. They read rumors, race you for Palace orders, haggle in character, cry their wares on a living street, and band together or betray you. Your own street cry is judged by the crowd: a charming one pulls in shoppers.
+> Bazaar Sovereign is a trading game where every merchant is an NFT that owns its own money. You run one of five houses in a desert bazaar for a 24-day season; four rival houses are AI agents with their own personalities, memories and grudges. They read rumors, race you for Palace orders, haggle in character, shout their wares, and band together or betray you.
 >
-> On NEAR testnet, each merchant is a NEP-171 charter NFT whose metadata tracks the live business (net worth, stance, bankruptcy) and which owns a sub-account wallet holding testnet NEAR. Goods are NEP-245 tokens in those wallets. Deals between houses settle atomically through an escrow in our contract: the seller's wallet locks the goods for one buyer at a fixed price, and the buyer's wallet pays and receives them in a single transaction. Bankrupt charters are seized or bought, moving the NFT and the whole business with it. Profits, losses and Moneylenders' Guild loans settle as real transfers between the town treasury and the merchant wallets.
+> On NEAR testnet each house is a NEP-171 charter NFT that holds its own vault of NEAR inside the contract and is bound to a stall wallet holding its NEP-245 goods; its metadata rewrites itself as the business lives. Only the charter's current owner can spend its vault, so taking over a bankrupt rival's charter hands you its money. Deals between houses, player to AI and AI to AI, settle by intents: each side's wallet signs a NEP-413 message saying what it gives and gets, and a solver settles the matched pair in one transaction after the contract checks signatures, nonces, deadlines and charter ownership. Profits, Guild loans and charter sales are real transfers too.
 >
-> On day 6 a magnate arrives with deep pockets and no goodwill. He sells below cost, seizes the charters of houses he bankrupts and takes a monopoly; if he still holds it on the last day, he owns the bazaar. Players beat him by keeping customers loyal through fair trade, buying off his carts, and rallying rivals into a pact (each AI rival answers in character; some refuse or ask a fee).
+> On day 6 a magnate arrives with deep pockets and no goodwill. He sells below cost, seizes the charters of houses he bankrupts and takes a monopoly; if he still holds it on day 24, he owns the bazaar. Players beat him by keeping shoppers loyal, buying off his carts, and rallying rivals into a pact (each AI answers in character; some refuse or ask a fee).
 >
-> Play free at https://bazaar.reconscribe.com: no wallet needed, three live testnet tables plus unlimited practice tables, voiced story scenes, every transaction linked on NearBlocks.
+> Play free at https://bazaar.reconscribe.com: no wallet needed, voiced cutscenes over animated paintings, a living street, and an "Inspect on NEAR" panel that reads every charter, vault and stock live from the chain.
 
 ## X post (273 characters; attach the video)
 

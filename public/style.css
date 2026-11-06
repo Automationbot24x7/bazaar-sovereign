@@ -311,3 +311,4 @@ dialog a:hover { color: #fff1c9; }
 .chips-row button { padding: 3px 10px; font-size: 11.5px; border-radius: 999px; }
 .magnate .hits .muted { font-size: 11.5px; }
 .table-banner button { margin-left: 8px; padding: 3px 12px; font-size: 12px; }
+.decision.kind-offer { border-color: var(--green); }

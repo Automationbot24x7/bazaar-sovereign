@@ -4,7 +4,7 @@ import { extname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
   GOODS, STANCES, SEASON_DAYS, createWorld, openingNews, step, netWorth, trading, takeover, takeoverPrice,
-  acceptContract, executeDeal, executeBuyout, buyoutValue, standings, chartersOwned, log, checkSeason, backroomDeals, TRIBUTE,
+  acceptContract, executeDeal, executeBuyout, reserved, buyoutValue, standings, chartersOwned, log, checkSeason, backroomDeals, TRIBUTE,
   hireHelpers, buyAwning, capacity, HELPER_WAGE, AWNING_COST,
   CRY, setCry, MAGNATE, GUILD, WATCH_COST, magnatePrice, raidMagnate, joinPact, borrow, repay, debtOf, bondOwed, canBorrow, hireWatch,
 } from './engine.js';
@@ -100,6 +100,34 @@ class Game {
     this.chain.setupMerchants(this.world.merchants, m => this.ownerOf(m)).catch(e => console.error(e));
     for (const m of this.npcs()) this.npcThink(m);
   }
+  // a rival with stock to spare, or short of cash, offers the player a bargain in its own voice
+  incomingOffer() {
+    const w = this.world, me = this.me(), G = Object.fromEntries(GOODS.map(g => [g.id, g]));
+    const lines = {
+      teodora: [g => `Fresh ${g}, child, and a fair price for a quick sale.`, g => `The Guild is knocking, child. Take some ${g} off my hands, cheaply.`],
+      kasim: [g => `Psst! ${g}, cheaper than anywhere in town, today only!`, g => `Cash, friend, I need cash! ${g}, practically free!`],
+      vey: [g => `Darling, I am clearing a little ${g}. You may have it.`, g => `A small favour, darling: buy some ${g}. Discreetly.`],
+      ozzo: [g => `A quiet word: I have ${g} to spare, and the price is kind... today.`, g => `Coin is scarce even for the wise. ${g}, below the market.`],
+    };
+    const cands = w.merchants.filter(m => !m.player && trading(m) && !m.ownedBy && !m.magnateHeld && (m.relation || 0) > -2 && lines[m.id]).sort(() => Math.random() - 0.5);
+    for (const m of cands) {
+      // the stock worth the most (not simply the largest pile): an offer worth looking at
+      const g = GOODS.map(x => x.id).filter(id => m.inventory[id] - reserved(w, m, id) >= 6).sort((a, b) => m.inventory[b] * w.prices[b] - m.inventory[a] * w.prices[a])[0];
+      if (!g) continue;
+      const spare = Math.floor(m.inventory[g] - reserved(w, m, g));
+      if (spare < 6) continue;
+      const needy = m.gold < 120 || (m.bonds?.length > 0);
+      const price = +(w.prices[g] * (needy ? 0.78 : 0.88)).toFixed(1);
+      const qty = Math.min(8, Math.floor(spare / 2), Math.floor((me.gold - 20) / price));
+      if (qty < 2) continue;
+      const total = Math.round(qty * price), name = G[g].name.toLowerCase();
+      return { kind: 'offer', title: `${m.name} offers you a deal`,
+        text: `“${lines[m.id][needy ? 1 : 0](name)}” ${qty} ${G[g].units} of ${name} at ${price} coins each (${total} in all; the market pays ${w.prices[g]}). If you accept, both wallets sign intents and it settles on NEAR in one transaction.`,
+        actions: [{ label: `Accept · ${total} coins`, act: 'acceptoffer', from: m.id, good: g, qty, price }, { label: 'No thanks', act: 'resume' }] };
+    }
+    return null;
+  }
+
   // independent rivals think for themselves; vassal stalls follow their owner's strategy
   npcs() { return this.world.merchants.filter(m => !m.player && trading(m) && !m.ownedBy); }
   me() { return this.world.merchants.find(m => m.player); }
@@ -250,6 +278,11 @@ class Game {
       d = { kind: 'bankrupt', title: 'A sudden storm!', text: `Rain soaked your stock: about ${lost} coins of goods ruined. ${Object.entries(w.lastStorm.losses).filter(([id, v]) => id !== 'you' && v === 0).length ? 'Stalls with an awning lost nothing.' : ''} An awning costs ${AWNING_COST} coins, once.`, actions: [{ label: `Buy an awning (${AWNING_COST} coins)`, act: 'awning' }, { label: 'Take the risk', act: 'resume' }] };
     }
     if (d) found.push(d);
+    // on a quiet day a rival may come to you with a deal of its own (agents trade, not only answer)
+    if (!found.length && w.day >= 2 && w.day - (this.lastIncoming ?? -9) >= 3 && Math.random() < 0.45) {
+      const o = this.incomingOffer();
+      if (o) { found.push(o); this.lastIncoming = w.day; }
+    }
     if (found.length && this.autoPause && this.running) {
       [this.decision, ...this.decisionQueue] = found.map(x => ({ ...x, day: w.day }));
       this.pause();
@@ -521,6 +554,14 @@ http.createServer(async (req, res) => {
             if (a.act === 'raid') raidMagnate(w, me, a.good, a.qty || MAGNATE.raidCap);
             if (a.act === 'pacts') { const replies = await g.askPact(null, false); g.play(); return send(res, 200, { ...g.view(), pactReplies: replies }); }
             if (a.act === 'deal') { g.decision = null; return send(res, 200, { ...g.view(), openDeal: a.target }); }
+            if (a.act === 'acceptoffer') {
+              const seller = w.merchants.find(m => m.id === a.from);
+              if (!seller || !trading(seller)) throw new Error('They are no longer trading');
+              const total = executeDeal(w, me, seller, a.good, a.qty, a.price);
+              seller.relation = Math.min(3, (seller.relation || 0) + 1);
+              seller.bark = 'A pleasure doing business.';
+              g.chain.recordDeal(me, seller, a.good, a.qty, total, w.merchants);
+            }
             if (a.act === 'claim') { acceptContract(w, me, a.id); me.doctrine = { stance: 'corner', focus: w.contracts.find(c => c.id === a.id).good, aggression: Math.max(0.7, me.doctrine.aggression) }; }
             if (a.act === 'takeover') { const t = w.merchants.find(m => m.id === a.target); const price = takeover(w, me, t); g.chain.recordCharterSale(me, t, price, 'bankruptcy seizure'); t.bark = 'A new master, a fresh start. I will not fail you.'; checkSeason(w); }
           } catch (e) { g.decision = null; return send(res, 400, { error: e.message }); }
