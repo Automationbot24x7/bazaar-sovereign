@@ -17,6 +17,7 @@ export const EVENTS = [
   { id: 'festival', text: 'Festival of Lanterns — the town feasts', rumor: 'Lantern makers are working overtime…', days: 3, demand: { saffron: 1.8, silk: 1.6, tea: 1.5, salt: 1.2 } },
   { id: 'monsoon', text: 'Monsoon floods the tea terraces', rumor: 'Clouds gather over the tea hills…', days: 3, supply: { tea: 0.3 } },
   { id: 'salt_glut', text: 'Salt barges flood the docks', rumor: 'Barges spotted upriver, riding low…', days: 2, supply: { salt: 2.5 } },
+  { id: 'storm', text: 'A sudden storm lashes the bazaar', sudden: true, days: 1, demand: { saffron: 0.6, silk: 0.6, tea: 0.6, salt: 0.6 }, soak: 0.12 },
   { id: 'taxman', text: 'The Vizier doubles stall rents', rumor: 'The Vizier’s clerks are counting stalls…', days: 3, rent: 2 },
 ];
 
@@ -28,6 +29,10 @@ function rng(seed) {
 
 export const RENT = 18;
 export const SEASON_DAYS = 24;
+export const BASE_CAPACITY = 22;   // customers a stall can serve in a day
+export const HELPER_CAPACITY = 14; // extra customers per hired helper
+export const HELPER_WAGE = 22;     // coins per helper per day
+export const AWNING_COST = 120;    // one-time: protects stock from sudden storms
 export const BAZAAR_TAX = 0.08; // the Vizier takes a cut of every retail sale
 
 export function createWorld({ seed = 7, merchants }) {
@@ -86,20 +91,20 @@ function palace(w) {
     if (m) {
       m.inventory[c.good] -= c.qty; m.gold += c.reward - (c.takenBy === m.id ? c.advance || 0 : 0); m.contractsWon = (m.contractsWon || 0) + 1;
       c.status = 'delivered'; c.deliveredBy = m.id;
-      log(w, `${m.name} delivered ${c.qty} ${G[c.good].name} to the Palace and was paid ${c.reward} dirhams!`, 'palace');
+      log(w, `${m.name} delivered ${c.qty} ${G[c.good].name} to the Palace and was paid ${c.reward} coins!`, 'palace');
       if (!m.player) m.bark = 'The Palace pays in gold, and I deliver in full.';
     } else if (w.day > c.due && c.takenBy && trading(w.merchants.find(x => x.id === c.takenBy)) && w.merchants.find(x => x.id === c.takenBy).inventory[c.good] >= Math.ceil(c.qty / 2)) {
       // partial delivery: at least half the order earns a pro-rated reward (minus the advance)
       const t = w.merchants.find(x => x.id === c.takenBy), q = t.inventory[c.good], pay = Math.round((c.reward * q) / c.qty * 0.7);
       t.inventory[c.good] -= q; t.gold += pay - (c.advance || 0); t.contractsWon = (t.contractsWon || 0) + 1;
       c.status = 'delivered'; c.deliveredBy = t.id; c.partial = q;
-      log(w, `${t.name} delivered ${q} of ${c.qty} ${G[c.good].name} late and short; the Palace paid ${pay} dirhams.`, 'palace');
+      log(w, `${t.name} delivered ${q} of ${c.qty} ${G[c.good].name} late and short; the Palace paid ${pay} coins.`, 'palace');
     } else if (w.day > c.due) {
       c.status = 'failed';
       if (c.takenBy) {
         const t = w.merchants.find(x => x.id === c.takenBy), fine = Math.min(60, Math.round(c.reward * 0.06));
         t.gold -= (c.advance || 0) + fine;
-        log(w, `${t.name} failed the Palace order: the ${c.advance || 0}-dirham advance is clawed back and a ${fine}-dirham fine is due.`, 'bankrupt');
+        log(w, `${t.name} failed the Palace order: the ${c.advance || 0}-coin advance is clawed back and a ${fine}-coin fine is due.`, 'bankrupt');
       } else log(w, `The Palace order for ${G[c.good].name} went unfilled.`, 'info');
     }
   }
@@ -110,7 +115,7 @@ function palace(w) {
     const qty = Math.max(6, Math.round(Math.min(g.supply * (1 + w.rand() * 0.6), 450 / (g.base * 0.65))));
     const c = { id: `PO-${w.day}`, good: g.id, qty, reward: Math.round(qty * g.base * (1.6 + w.rand() * 0.4)), due: w.day + 5, takenBy: null, status: 'open', posted: w.day };
     w.contracts.unshift(c);
-    log(w, `The Palace wants ${qty} ${g.name} by day ${c.due}, paying ${c.reward} dirhams.`, 'palace');
+    log(w, `The Palace wants ${qty} ${g.name} by day ${c.due}, paying ${c.reward} coins.`, 'palace');
   }
   w.contracts.length = Math.min(w.contracts.length, 12);
 }
@@ -122,7 +127,7 @@ export function acceptContract(w, m, id) {
   c.takenBy = m.id;
   c.advance = Math.round(c.reward * 0.15); // the Palace pays an advance so the taker can buy stock
   m.gold += c.advance;
-  log(w, `${m.name} claimed the Palace order for ${c.qty} ${G[c.good].name} and received a ${c.advance}-dirham advance.`, 'palace');
+  log(w, `${m.name} claimed the Palace order for ${c.qty} ${G[c.good].name} and received a ${c.advance}-coin advance.`, 'palace');
   return c;
 }
 
@@ -182,14 +187,28 @@ export function step(w) {
     const e = EVENTS.find(x => x.id === first);
     w.pending = e;
     log(w, `Rumor: ${e.rumor}`, 'rumor');
+  } else if (w.day > 3 && !w.active.length && !w.pending && w.rand() < 0.07) {
+    // a sudden storm: no rumor, no warning; stalls without an awning lose soaked stock
+    const e = EVENTS.find(x => x.id === 'storm');
+    w.active.push({ ...e, left: e.days });
+    w.lastStorm = { day: w.day, losses: {} };
+    for (const m of w.merchants.filter(trading)) {
+      if (m.awning) continue;
+      let lost = 0;
+      for (const g of GOODS) { const q = Math.floor((m.inventory[g.id] - reserved(w, m, g.id)) * e.soak); if (q > 0) { m.inventory[g.id] -= q; lost += q * w.prices[g.id]; } }
+      w.lastStorm.losses[m.id] = Math.round(lost);
+    }
+    log(w, `${e.text}! Stalls without an awning lose soaked stock.`, 'event');
   } else if (w.rand() < 0.22 && !w.active.length) {
-    const e = EVENTS[Math.floor(w.rand() * EVENTS.length)];
+    const pool = EVENTS.filter(x => !x.sudden);
+    const e = pool[Math.floor(w.rand() * pool.length)];
     w.pending = e;
     log(w, `Rumor: ${e.rumor}`, 'rumor');
   }
   for (const v of w.merchants.filter(m => m.ownedBy && trading(m))) { const o = w.merchants.find(x => x.id === v.ownedBy); if (o) v.doctrine = { ...o.doctrine }; }
   const { sup, dem, rent } = modifiers(w);
   const alive = w.merchants.filter(trading);
+  for (const m of w.merchants) m.servedToday = 0;
   const pnl = Object.fromEntries(w.merchants.map(m => [m.id, 0]));
 
   for (const g of GOODS) {
@@ -220,16 +239,16 @@ export function step(w) {
     const sell = (b, q) => {
       q = Math.floor(q);
       if (q <= 0) return 0;
-      sold += q; revenue += q * b.ask;
+      sold += q; revenue += q * b.ask; b.m.servedToday = (b.m.servedToday || 0) + q;
       const net = q * b.ask * (1 - BAZAAR_TAX);
       b.m.inventory[g.id] -= q; b.m.gold += net; pnl[b.m.id] += net;
       trades.push({ day: w.day, merchant: b.m.id, side: 'sell', good: g.id, qty: q, price: b.ask });
       return q;
     };
-    const avail = b => Math.max(0, b.m.inventory[g.id] - reserved(w, b.m, g.id));
+    const avail = b => Math.max(0, Math.min(b.m.inventory[g.id] - reserved(w, b.m, g.id), capacity(b.m) - (b.m.servedToday || 0)));
     for (const b of book) b.m.lastAsk = { ...(b.m.lastAsk || {}), [g.id]: b.ask };
     let sellers = book.filter(b => avail(b) > 0 && b.ask < choke);
-    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.8 : 1);
+    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.45 : 1);
     if (sellers.length) {
       const W0 = sellers.reduce((t, b) => t + weight(b), 0);
       const pAvg = sellers.reduce((t, b) => t + b.ask * weight(b), 0) / W0;
@@ -258,7 +277,7 @@ export function step(w) {
 
   // ---- costs, spoilage, bankruptcy ----
   for (const m of alive) {
-    let cost = RENT * rent;
+    let cost = RENT * rent + (m.helpers || 0) * HELPER_WAGE;
     for (const g of GOODS) {
       cost += m.inventory[g.id] * g.storage;
       // stock reserved for the Palace is sealed in the Palace storeroom and does not spoil
@@ -286,10 +305,12 @@ export function step(w) {
     }
   }
   for (const m of w.merchants) { m.netHistory.push(+netWorth(w, m).toFixed(2)); if (m.netHistory.length > 120) m.netHistory.shift(); }
+  for (const m of w.merchants) if (m.helpers && --m.helperDays <= 0) { m.helpers = 0; m.helperDays = 0; }
   for (const e of w.active) e.left -= 1;
   for (const e of w.active.filter(e => e.left <= 0)) log(w, `${e.text} has ended.`, 'info');
   w.active = w.active.filter(e => e.left > 0);
 
+  rivalPreparations(w);
   checkSeason(w);
   const settlement = w.merchants.map(m => ({ merchant: m.id, pnl: m.lastPnl })).filter(r => r.pnl !== 0);
   w.ledger.push({ day: w.day, settlement, trades: trades.length });
@@ -306,7 +327,7 @@ export function takeover(w, buyer, target) {
   const price = takeoverPrice(w, target);
   if (!target.bankrupt || target.ownedBy) throw new Error('Only unclaimed bankrupt charters can be taken over');
   const capital = Math.round(Math.max(80, price * 0.6)); // the new owner reopens the stall with working capital
-  if (buyer.gold < price + capital) throw new Error(`You need ${Math.round(price + capital)} dirhams (${price} for the charter, ${capital} to reopen the stall)`);
+  if (buyer.gold < price + capital) throw new Error(`You need ${Math.round(price + capital)} coins (${price} for the charter, ${capital} to reopen the stall)`);
   buyer.gold -= price + capital;
   target.gold = capital; target.bankrupt = false; target.ownedBy = buyer.id; target.vassalSince = w.day;
   log(w, `${buyer.name} seized ${target.name}'s charter. The stall reopens as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
@@ -342,11 +363,11 @@ export function checkSeason(w) {
 export function executeDeal(w, buyer, seller, good, qty, price) {
   if (seller.inventory[good] - reserved(w, seller, good) < qty) throw new Error(`${seller.name} doesn't have ${qty} ${G[good].name} to spare`);
   const total = Math.round(qty * price);
-  if (buyer.gold < total) throw new Error(`You need ${total} dirhams`);
+  if (buyer.gold < total) throw new Error(`You need ${total} coins`);
   buyer.gold -= total; seller.gold += total;
   buyer.cost[good] = (buyer.cost[good] * buyer.inventory[good] + price * qty) / (buyer.inventory[good] + qty);
   buyer.inventory[good] += qty; seller.inventory[good] -= qty;
-  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price} dirhams each.`, 'deal');
+  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price} coins each.`, 'deal');
   return total;
 }
 
@@ -356,11 +377,11 @@ export function buyoutValue(w, target) {
 }
 export function executeBuyout(w, buyer, target, price) {
   if (!trading(target)) throw new Error(`${target.name} is not trading`);
-  if (buyer.gold < price) throw new Error(`You need ${price} dirhams`);
+  if (buyer.gold < price) throw new Error(`You need ${price} coins`);
   if (target.ownedBy) throw new Error(`${target.name} already serves another house`);
   buyer.gold -= price;
   target.ownedBy = buyer.id; target.soldFor = price; target.vassalSince = w.day;
-  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} dirhams. The stall now trades as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
+  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} coins. The stall now trades as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
 }
 
 // ---------- back-room deals between rivals ----------
@@ -400,4 +421,33 @@ export function backroomDeals(w, relationToPlayer) {
     }
   }
   return deals;
+}
+
+// ---------- staff and stall upgrades ----------
+export const capacity = m => BASE_CAPACITY + (m.helpers || 0) * HELPER_CAPACITY;
+
+export function hireHelpers(w, m, n, days) {
+  n = Math.max(0, Math.min(3, Math.round(n))); days = Math.max(1, Math.min(6, Math.round(days)));
+  if (n === 0) { m.helpers = 0; m.helperDays = 0; return; }
+  if (m.gold < n * HELPER_WAGE * 2) throw new Error(`You need at least ${n * HELPER_WAGE * 2} coins to take on ${n} helper${n > 1 ? 's' : ''}`);
+  m.helpers = n; m.helperDays = days;
+  log(w, `${m.name} hired ${n} helper${n > 1 ? 's' : ''} for ${days} days (${n * HELPER_WAGE} coins a day).`, 'info');
+}
+
+export function buyAwning(w, m) {
+  if (m.awning) throw new Error('Your stall already has an awning');
+  if (m.gold < AWNING_COST + RENT * 2) throw new Error(`An awning costs ${AWNING_COST} coins`);
+  m.gold -= AWNING_COST; m.awning = true;
+  log(w, `${m.name} put up a sturdy awning against the storms.`, 'info');
+}
+
+// how rivals prepare: cautious and premium houses staff up for feasts and cover their stalls
+export function rivalPreparations(w) {
+  const festival = w.pending?.demand || w.active.some(e => e.demand && !e.sudden);
+  for (const m of w.merchants.filter(m => !m.player && trading(m) && !m.ownedBy)) {
+    const t = (m.persona || '').toLowerCase(), careful = /patient|cautious|noble|aristocratic|plans/.test(t), reckless = /reckless/.test(t);
+    if (festival && !m.helpers && !reckless && m.gold > 260) { try { hireHelpers(w, m, careful ? 2 : 1, 4); } catch {} }
+    const soaked = w.lastStorm?.losses?.[m.id] > 0 && w.lastStorm.day === w.day;
+    if (!m.awning && !reckless && m.gold > 300 && (soaked || (careful && w.day >= 6))) { try { buyAwning(w, m); } catch {} }
+  }
 }

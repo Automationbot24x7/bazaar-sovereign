@@ -63,6 +63,7 @@
         <label class="grow">Aggression <input id="aggr" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
       </div>
       <div class="hint" id="stanceHint"></div>
+      <div class="upgrades" id="upgrades"></div>
       <canvas id="race" height="140"></canvas>
       <div class="legend" id="legend"></div>
     </section>
@@ -98,13 +99,13 @@
     <form id="dealGoods" class="deal-form">
       <label>Good <select id="dGood"></select></label>
       <label>Quantity <input id="dQty" type="number" min="1" step="1" value="5" /></label>
-      <label>Price each (dirhams) <input id="dPrice" type="number" min="0.1" step="0.1" /></label>
+      <label>Price each (coins) <input id="dPrice" type="number" min="0.1" step="0.1" /></label>
       <div class="muted" id="dTotal"></div>
       <button class="primary">Make the offer</button>
     </form>
     <form id="dealBuyout" class="deal-form" hidden>
       <p class="muted">If they accept, they retire: their charter NFT, stock and till become yours. Hold three charters to be crowned Sovereign.</p>
-      <label>Total price (dirhams) <input id="bPrice" type="number" min="1" step="1" /></label>
+      <label>Total price (coins) <input id="bPrice" type="number" min="1" step="1" /></label>
       <div class="muted" id="bHint"></div>
       <button class="primary">Offer to buy them out</button>
     </form>
@@ -113,7 +114,7 @@
 
   <dialog id="intro">
     <h2>Welcome to the bazaar</h2>
-    <p>You inherit a merchant charter: an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you for 24 days. Money is counted in silver dirhams.</p>
+    <p>You inherit a merchant charter: an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you for 24 days. Money is counted in coins.</p>
     <ul>
       <li><b>Rumors</b> warn of droughts, caravans and festivals a day early. Corner a market before it moves.</li>
       <li><b>Palace orders</b> pay double. Claim one, then buy up the good to deliver it.</li>

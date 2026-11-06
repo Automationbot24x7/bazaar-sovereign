@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import {
   GOODS, STANCES, SEASON_DAYS, createWorld, openingNews, step, netWorth, trading, takeover, takeoverPrice,
   acceptContract, executeDeal, executeBuyout, buyoutValue, standings, chartersOwned, log, checkSeason, backroomDeals, TRIBUTE,
+  hireHelpers, buyAwning, capacity, HELPER_WAGE, AWNING_COST,
 } from './engine.js';
 import { think, interpretOrder, answerOffer, aiOn, stats, MODEL_LABEL } from './brains.js';
 import { makeChain, testnetAvailable } from './chain.js';
@@ -150,10 +151,10 @@ class Game {
     const fallen = w.merchants.find(m => m.bankrupt && !m.ownedBy && !bankruptBefore.has(m.id) && !m.player);
     let d = null;
     if (fallen) {
-      d = { kind: 'bankrupt', title: `${fallen.name} is bankrupt!`, text: `Their charter can be seized for ${takeoverPrice(w, fallen)} dirhams (plus working capital to reopen it). If you don't, a rival will within three days.`, actions: [{ label: 'Seize the charter', act: 'takeover', target: fallen.id }, { label: 'Let it go', act: 'resume' }] };
+      d = { kind: 'bankrupt', title: `${fallen.name} is bankrupt!`, text: `Their charter can be seized for ${takeoverPrice(w, fallen)} coins (plus working capital to reopen it). If you don't, a rival will within three days.`, actions: [{ label: 'Seize the charter', act: 'takeover', target: fallen.id }, { label: 'Let it go', act: 'resume' }] };
     } else if (newOrder) {
       const g = G[newOrder.good];
-      d = { kind: 'palace', title: 'The Palace wants goods', text: `${newOrder.qty} ${g.units} of ${g.name.toLowerCase()} by day ${newOrder.due}, paying ${newOrder.reward} dirhams (a ${Math.round(newOrder.reward * 0.15)}-dirham advance when you claim it). Rivals will race you for it.`, actions: [{ label: 'Claim it', act: 'claim', id: newOrder.id }, { label: 'Leave it', act: 'resume' }] };
+      d = { kind: 'palace', title: 'The Palace wants goods', text: `${newOrder.qty} ${g.units} of ${g.name.toLowerCase()} by day ${newOrder.due}, paying ${newOrder.reward} coins (a ${Math.round(newOrder.reward * 0.15)}-coin advance when you claim it). Rivals will race you for it.`, actions: [{ label: 'Claim it', act: 'claim', id: newOrder.id }, { label: 'Leave it', act: 'resume' }] };
     } else if (newRumor) {
       const e = w.pending, short = Object.entries(e.supply || {}).find(([, v]) => v < 1), glut = Object.entries(e.supply || {}).find(([, v]) => v > 1);
       const actions = short ? [{ label: `Corner ${G[short[0]].name.toLowerCase()}`, act: 'doctrine', doctrine: { stance: 'corner', focus: short[0], aggression: 0.8 } }]
@@ -161,7 +162,13 @@ class Game {
         : glut ? [{ label: `Sell ${G[glut[0]].name.toLowerCase()} now`, act: 'doctrine', doctrine: { stance: 'liquidate', focus: null, aggression: 0.5 } }]
         : [{ label: 'Keep a cash cushion', act: 'doctrine', doctrine: { stance: 'premium', focus: null, aggression: 0.4 } }];
       const hint = short ? `${G[short[0]].name} will be scarce tomorrow. Whoever holds it sets the price.` : e.demand ? 'A feast is coming: prices will rise across the board.' : glut ? `A flood of ${G[glut[0]].name.toLowerCase()} is coming: prices will crash.` : 'Rents are about to double. Thin margins will hurt.';
-      d = { kind: 'rumor', title: 'A rumor in the bazaar', text: `“${e.rumor}” ${hint}`, actions: [...actions, { label: 'Ignore it', act: 'resume' }] };
+      const hire = e.demand && !me.helpers ? [{ label: `Hire 2 helpers for the feast (${2 * HELPER_WAGE} coins/day)`, act: 'hire', n: 2, days: 4 }] : [];
+      d = { kind: 'rumor', title: 'A rumor in the bazaar', text: `“${e.rumor}” ${hint}${e.demand ? ' Crowds will be bigger than one stall can serve.' : ''}`, actions: [...actions, ...hire, { label: 'Ignore it', act: 'resume' }] };
+    }
+    const storm = w.lastStorm?.day === w.day;
+    if (!d && storm && !me.awning) {
+      const lost = w.lastStorm.losses[me.id] || 0;
+      d = { kind: 'bankrupt', title: 'A sudden storm!', text: `Rain soaked your stock: about ${lost} coins of goods ruined. ${Object.entries(w.lastStorm.losses).filter(([id, v]) => id !== 'you' && v === 0).length ? 'Stalls with an awning lost nothing.' : ''} An awning costs ${AWNING_COST} coins, once.`, actions: [{ label: `Buy an awning (${AWNING_COST} coins)`, act: 'awning' }, { label: 'Take the risk', act: 'resume' }] };
     }
     if (d && this.autoPause && this.running) { this.decision = { ...d, day: w.day }; this.pause(); }
   }
@@ -199,6 +206,7 @@ class Game {
         walletUrl: this.chain.explorerAccount(m.wallet), charters: chartersOwned(w, m), contractsWon: m.contractsWon || 0,
         netHistory: m.netHistory.slice(-60), lastAsk: m.lastAsk || {},
         takeoverPrice: m.bankrupt && !m.ownedBy ? takeoverPrice(w, m) : null,
+        helpers: m.helpers || 0, helperDays: m.helperDays || 0, awning: !!m.awning, capacity: capacity(m), servedToday: m.servedToday || 0,
         profile: m.profile || null, lessons: (m.lessons || []).slice(-5), mood: m.player ? null : mood(m),
         buyoutHint: !m.player && trading(m) && !m.ownedBy ? buyoutValue(w, m) : null,
       })),
@@ -249,12 +257,12 @@ async function makeOffer(g, b) {
   if (b.kind === 'buyout') {
     offer = { kind: 'buyout', price: Math.round(Number(b.price)) };
     if (!(offer.price > 0)) throw new Error('Name a price');
-    if (offer.price > me.gold) throw new Error(`You only have ${Math.round(me.gold)} dirhams`);
+    if (offer.price > me.gold) throw new Error(`You only have ${Math.round(me.gold)} coins`);
   } else {
     offer = { kind: 'goods', good: b.good, qty: Math.round(Number(b.qty)), price: Math.round(Number(b.price) * 100) / 100 };
     if (!GOODS.some(x => x.id === offer.good) || !(offer.qty > 0) || !(offer.price > 0)) throw new Error('Choose a good, quantity and price');
     if (rival.inventory[offer.good] < offer.qty) throw new Error(`${rival.name} only holds ${rival.inventory[offer.good]} ${offer.good}`);
-    if (offer.qty * offer.price > me.gold) throw new Error(`That costs ${Math.round(offer.qty * offer.price)} dirhams; you have ${Math.round(me.gold)}`);
+    if (offer.qty * offer.price > me.gold) throw new Error(`That costs ${Math.round(offer.qty * offer.price)} coins; you have ${Math.round(me.gold)}`);
   }
   // a merchant keeps their word: meeting their last counter-offer closes the deal
   g.counters ||= {};
@@ -281,7 +289,7 @@ async function makeOffer(g, b) {
       g.chain.recordDeal(me, rival, offer.good, offer.qty, total, w.merchants);
     }
   } else {
-    log(w, `${rival.name} turned down your ${offer.kind === 'buyout' ? 'buyout' : 'offer'}${reply.counter ? ` (would take ${reply.counter}${offer.kind === 'buyout' ? ' dirhams' : ` dirhams each${reply.counterQty && reply.counterQty !== offer.qty ? ` for ${reply.counterQty}` : ''}`})` : ''}.`, 'deal');
+    log(w, `${rival.name} turned down your ${offer.kind === 'buyout' ? 'buyout' : 'offer'}${reply.counter ? ` (would take ${reply.counter}${offer.kind === 'buyout' ? ' coins' : ` coins each${reply.counterQty && reply.counterQty !== offer.qty ? ` for ${reply.counterQty}` : ''}`})` : ''}.`, 'deal');
   }
   return { ...g.view(), reply: { ...reply, offer, rival: rival.name } };
 }
@@ -306,12 +314,16 @@ http.createServer(async (req, res) => {
         case '/api/play': g.play(); return send(res, 200, g.view());
         case '/api/pause': g.pause(); return send(res, 200, g.view());
         case '/api/speed': g.speedMs = Math.max(400, Math.min(5000, Number(b.ms) || 2500)); return send(res, 200, g.view());
+        case '/api/hire': hireHelpers(w, me, Number(b.n), Number(b.days) || 4); return send(res, 200, g.view());
+        case '/api/awning': buyAwning(w, me); return send(res, 200, g.view());
         case '/api/autopause': g.autoPause = !!b.on; return send(res, 200, g.view());
         case '/api/decide': {
           const a = g.decision?.actions?.[Number(b.index)];
           if (!a) return send(res, 400, { error: 'Nothing to decide' });
           try {
             if (a.act === 'doctrine') me.doctrine = { ...a.doctrine };
+            if (a.act === 'hire') hireHelpers(w, me, a.n, a.days);
+            if (a.act === 'awning') buyAwning(w, me);
             if (a.act === 'claim') { acceptContract(w, me, a.id); me.doctrine = { stance: 'corner', focus: w.contracts.find(c => c.id === a.id).good, aggression: Math.max(0.7, me.doctrine.aggression) }; }
             if (a.act === 'takeover') { const t = w.merchants.find(m => m.id === a.target); const price = takeover(w, me, t); g.chain.recordCharterSale(me, t, price, 'bankruptcy seizure'); t.bark = 'A new master, a fresh start. I will not fail you.'; checkSeason(w); }
           } catch (e) { g.decision = null; return send(res, 400, { error: e.message }); }

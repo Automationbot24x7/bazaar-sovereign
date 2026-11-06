@@ -155,7 +155,7 @@ export function makeChain(live) {
         const m = byId[merchant];
         if (!m || Math.abs(pnl) * GOLD_TO_NEAR < 0.00001) continue;
         const [from, to] = pnl > 0 ? [TREASURY, m.wallet] : [m.wallet, TREASURY];
-        const text = `${m.player ? 'You' : m.name} ${pnl > 0 ? 'earned' : 'lost'} ${Math.abs(pnl).toFixed(0)}g over days ${Math.max(1, day - 4)}–${day}, paid ${pnl > 0 ? 'out by' : 'in to'} the treasury.`;
+        const text = `${m.player ? 'You' : m.name} ${pnl > 0 ? 'earned' : 'lost'} ${Math.abs(pnl).toFixed(0)} coins over days ${Math.max(1, day - 4)}–${day}, paid ${pnl > 0 ? 'out by' : 'in to'} the treasury.`;
         if (!live) { push('settle', text, mockHash()); continue; }
         enqueue(from, `settle ${m.slug}`, async () => {
           if (pnl < 0) await ensureFunds(m, -pnl);
@@ -174,7 +174,7 @@ export function makeChain(live) {
     // goods deal between houses: seller's wallet signs mt_transfer, buyer's wallet pays the seller
     recordDeal(buyer, seller, good, qty, total, merchants) {
       const text = `${seller.name}'s stall hands over ${qty} ${good}, signed by its own wallet.`;
-      const payText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)}g, wallet to wallet.`;
+      const payText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)} coins (${fmtNear(total)} NEAR), wallet to wallet.`;
       if (!live) { push('deal', text, mockHash()); push('pay', payText, mockHash()); return; }
       // the Vizier first mirrors the seller's pre-deal stock so the on-chain balance exists
       const pre = merchants.filter(m => m === buyer || m === seller).map(m => ({ account_id: m.wallet, token_id: good, amount: String(Math.floor(m.inventory[good] + (m === seller ? qty : -qty))) }));
@@ -185,7 +185,7 @@ export function makeChain(live) {
 
     // charter sale: Vizier lists it, then the buyer's own wallet buys it with the price attached
     recordCharterSale(buyer, target, price, reason) {
-      const text = `${buyer.player ? 'You buy' : buyer.name + ' buys'} ${target.name}'s charter for ${Math.round(price)}g. The NFT moves to the buyer's stall.`;
+      const text = `${buyer.player ? 'You buy' : buyer.name + ' buys'} ${target.name}'s charter for ${Math.round(price)} coins (${fmtNear(price)} NEAR). The NFT moves to the buyer's stall.`;
       if (!live) { push('listed', `${target.name}'s charter is put up for sale (${reason}).`, mockHash()); push('takeover', text, mockHash()); return; }
       const deposit = yocto(price);
       enqueue(ROOT, 'list charter', async () => {

@@ -12,7 +12,7 @@ const STANCE_HINT = {
 };
 const FEED_ICON = { mint: '📜', wallet: '👛', transfer: '↩', goods: '⚖', update: '✎', settle: '🪙', deal: '🤝', pay: '🪙', listed: '🏷', takeover: '♛', loan: '🏦', error: '⚠' };
 const SPEEDS = [2500, 1200, 600];
-const dh = n => `${Math.round(n).toLocaleString()} dirhams`;
+const dh = n => `${Math.round(n).toLocaleString()} coins`;
 let S = null, speedIdx = 0, prevBarks = {}, dealWith = null;
 
 const goodName = id => S.goods.find(g => g.id === id)?.name || id;
@@ -29,8 +29,8 @@ function stalls() {
       <div class="portrait" style="background-image:url(/art/${m.art}.webp)"></div>
       <div>
         <h3>${esc(m.name)}${m.charters > 1 ? ` <span class="crowns" title="Charters held">${'♛'.repeat(m.charters)}</span>` : ''}${!m.player && m.mood ? ` <span class="mood ${m.mood.key}" title="Attitude toward you">${m.mood.label}</span>` : ''}</h3>
-        <div class="nw">${m.netWorth.toLocaleString()}<small> dh net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}" title="Profit or loss yesterday">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
-        <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>
+        <div class="nw">${m.netWorth.toLocaleString()}<small> coins net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}" title="Profit or loss yesterday">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
+        <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>${m.helpers ? ` <span class="perk" title="${m.helpers} hired helper(s), ${m.helperDays} day(s) left">👥${m.helpers}</span>` : ''}${m.awning ? ' <span class="perk" title="Awning: safe from sudden storms">☂</span>' : ''}
         ${S.ai === 'live' && m.modelLabel && !m.vassal ? `<span class="brain" title="${esc(m.player ? 'Your factor' : m.name)} — ${esc(m.modelLabel)}${m.thinkMs ? `, last decision took ${(m.thinkMs / 1000).toFixed(1)}s` : ''}">${m.thinking ? '<i class="dots"></i>' : '✦'} ${esc(m.modelLabel)}${m.thinkMs ? ` · ${(m.thinkMs / 1000).toFixed(1)}s` : ''}</span>` : ''}
       </div>
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
@@ -84,7 +84,7 @@ function goods() {
   }
   for (const g of S.goods) {
     const card = el.querySelector(`[data-g="${g.id}"]`), h = g.history, prev = h.at(-6) ?? h[0], ch = ((g.price - prev) / prev) * 100;
-    card.querySelector('.p').innerHTML = `${g.price.toFixed(1)} <small>dh / ${g.unit}</small>`;
+    card.querySelector('.p').innerHTML = `${g.price.toFixed(1)} <small>coins / ${g.unit}</small>`;
     const d = card.querySelector('.d'); d.textContent = `${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(0)}%`; d.className = 'd ' + (ch >= 0 ? 'pnl up' : 'pnl down');
     spark(card.querySelector('canvas'), h, ch >= 0 ? '#6cc483' : '#e0614a');
     const total = S.merchants.reduce((t, m) => t + m.inventory[g.id], 0) || 1;
@@ -105,7 +105,7 @@ function race() {
     c.beginPath(); d.forEach((v, i) => { const x = (i / Math.max(d.length - 1, 1)) * w, y = h - 6 - ((v - min) / (max - min)) * (h - 12); i ? c.lineTo(x, y) : c.moveTo(x, y); });
     c.strokeStyle = m.color; c.lineWidth = m.player ? 3 : 1.6; c.globalAlpha = m.trading ? 1 : 0.35; c.stroke(); c.globalAlpha = 1;
   }
-  $('#legend').innerHTML = S.standings.map((r, i) => `<span><i style="background:${merchant(r.id).color}"></i>${i + 1}. ${esc(r.name)} ${r.netWorth.toLocaleString()} dh</span>`).join('');
+  $('#legend').innerHTML = S.standings.map((r, i) => `<span><i style="background:${merchant(r.id).color}"></i>${i + 1}. ${esc(r.name)} ${r.netWorth.toLocaleString()} coins</span>`).join('');
 }
 
 function feeds() {
@@ -130,6 +130,9 @@ function header() {
   if (document.activeElement !== $('#focus')) $('#focus').value = me.doctrine.focus || '';
   if (document.activeElement !== $('#aggr')) $('#aggr').value = me.doctrine.aggression;
   $('#stanceHint').textContent = STANCE_HINT[me.doctrine.stance];
+  $('#upgrades').innerHTML = `<span>Serving ${me.servedToday}/${me.capacity} customers today</span>
+    ${me.helpers ? `<span>👥 ${me.helpers} helper${me.helpers > 1 ? 's' : ''} · ${me.helperDays}d left <button class="ghost" data-up="fire">Let go</button></span>` : `<button class="ghost" data-up="hire" title="Each helper serves 14 more customers a day for 22 coins/day, for 4 days">👥 Hire a helper</button>`}
+    ${me.awning ? '<span>☂ Awning up</span>' : '<button class="ghost" data-up="awning" title="One-time 120 coins: sudden storms will not soak your stock">☂ Buy an awning (120)</button>'}`;
   decision();
   coach();
   const b = $('#tableBanner');
@@ -252,6 +255,12 @@ $('#focus').onchange = e => setDoctrine({ focus: e.target.value || null });
 $('#aggr').onchange = e => setDoctrine({ aggression: Number(e.target.value) });
 $('#play').onclick = () => api(S.running ? '/api/pause' : '/api/play', {}).then(render);
 $('#speed').onclick = () => { speedIdx = (speedIdx + 1) % SPEEDS.length; $('#speed').textContent = ['1×', '2×', '4×'][speedIdx]; api('/api/speed', { ms: SPEEDS[speedIdx] }).then(render); };
+$('#upgrades').onclick = e => {
+  const u = e.target.dataset.up; if (!u) return;
+  const me = S.merchants.find(m => m.player);
+  const call = u === 'awning' ? api('/api/awning', {}) : api('/api/hire', { n: u === 'fire' ? 0 : Math.min(3, (me.helpers || 0) + 1), days: 4 });
+  call.then(render).catch(err => alert(err.message));
+};
 $('#autoPause').onchange = e => api('/api/autopause', { on: e.target.checked }).then(render);
 $('#decision').onclick = e => { const i = e.target.dataset.i; if (i != null) { mark('decided'); api('/api/decide', { index: Number(i) }).then(render).catch(err => { alert(err.message); refresh(); }); } };
 $('#sim').onclick = async e => { const b = e.currentTarget; b.disabled = true; b.textContent = '⏩ …'; const poll = setInterval(refresh, 300); await api('/api/simulate', { days: 10 }).then(render).catch(err => alert(err.message)); clearInterval(poll); b.disabled = S?.over; b.textContent = '⏩ 10 days'; };

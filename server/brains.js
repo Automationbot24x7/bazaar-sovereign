@@ -59,11 +59,11 @@ const OFFER_TOOL = {
 // ---------- The Bazaar Codex: long, static, cached ----------
 const pct = x => `${Math.round(x * 100)}%`;
 const CODEX = `# THE BAZAAR CODEX
-Money in the bazaar is counted in silver dirhams (the report calls the amount 'gold' for historical reasons; always say 'dirhams' when speaking). Goods are sold by the pouch (saffron), bolt (silk), sack (tea) and block (salt).
+Money in the bazaar is counted in coins (the report calls the amount 'gold' for historical reasons; always say 'coins' when speaking). Goods are sold by the pouch (saffron), bolt (silk), sack (tea) and block (salt).
 You are playing a merchant in "Bazaar Sovereign", a trading game set in a desert-city bazaar. Five merchant houses compete: four rivals and the player's house. Every merchant house is a charter (an NFT on the NEAR blockchain) that owns its own wallet. Read this codex carefully; it is the complete rulebook. Each turn you receive a market report and must choose your doctrine with the set_doctrine tool.
 
 ## 1. Goods
-${GOODS.map(g => `- **${g.name}** (id \`${g.id}\`): base price ${g.base} dirhams a ${g.unit}. Daily supply ≈ ${g.supply} units, daily town demand ≈ ${g.demand} units at fair prices. Storage costs ${g.storage} dirhams per ${g.unit} per day.${g.spoil ? ` Spoils: loses ${pct(g.spoil)} of stock every day.` : ' Does not spoil.'}`).join('\n')}
+${GOODS.map(g => `- **${g.name}** (id \`${g.id}\`): base price ${g.base} coins a ${g.unit}. Daily supply ≈ ${g.supply} units, daily town demand ≈ ${g.demand} units at fair prices. Storage costs ${g.storage} coins per ${g.unit} per day.${g.spoil ? ` Spoils: loses ${pct(g.spoil)} of stock every day.` : ' Does not spoil.'}`).join('\n')}
 
 Saffron is scarce and valuable; silk is a luxury; tea is cheap but perishable; salt is cheap, plentiful and safe to store.
 
@@ -92,6 +92,9 @@ How to read them: a supply shock (drought, monsoon) means the few units that rea
 - **liquidate** — stop buying and sell everything cheaply for cash. Use when gold is dangerously low or before a glut crushes your stock's value.
 
 **Aggression** scales how hard the doctrine is pursued: bids, quantities and markups.
+
+## 4b. Staff and weather
+Each stall can serve about 22 customers a day; every hired helper adds 14 more for 22 coins a day. Helpers only pay off when crowds are big, at festivals. Sudden storms come without warning: stalls without an awning (a one-time 120 coins) lose about 12% of their stock, and shoppers stay home that day.
 
 ## 5. Palace orders
 Every few days the Palace posts an order: a quantity of one good, a deadline, and a reward of roughly two to two-and-a-half times the market value. One merchant may claim an open order (claim_palace_order). Once claimed, that merchant's stock of the good is reserved and cannot be sold at retail; the order is delivered automatically the moment the claimant holds the full quantity, and missing the deadline costs a fine of a quarter of the reward. An unclaimed order goes to whichever merchant first holds the full quantity. Claiming an order and then cornering that good is one of the strongest plays in the game, so rivals race for them.
@@ -133,7 +136,7 @@ function snapshot(w, me) {
     rumor: w.pending ? w.pending.rumor : null,
     seasonDaysLeft: SEASON_DAYS - w.day,
     palaceOrders: w.contracts.filter(c => c.status === 'open').map(c => ({ id: c.id, good: c.good, qty: c.qty, reward: c.reward, dueDay: c.due, claimedBy: c.takenBy ? (w.merchants.find(m => m.id === c.takenBy)?.name) : null })),
-    me: { gold: me.gold, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine, lessonsFromThisSeason: me.lessons || [], attitudeToPlayer: me.player ? undefined : (me.relation || 0) },
+    me: { gold: me.gold, helpers: me.helpers || 0, awning: !!me.awning, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine, lessonsFromThisSeason: me.lessons || [], attitudeToPlayer: me.player ? undefined : (me.relation || 0) },
     rivals: w.merchants.filter(m => m !== me).map(m => ({
       name: m.name, bankrupt: m.bankrupt, doctrine: m.doctrine.stance + (m.doctrine.focus ? `:${m.doctrine.focus}` : ''),
       netWorth: Math.round(netWorth(w, m)), stock: m.inventory, lastAsk: m.lastAsk, lastBark: m.bark,
