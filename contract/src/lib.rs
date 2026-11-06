@@ -7,8 +7,10 @@
 //! moves to the buyer and the whole business (wallet, stock, debts) goes with it.
 //!
 //! Goods (saffron, silk, tea, salt) are NEP-245 multi-tokens held by merchant wallets.
-//! Merchants move goods between themselves with `mt_transfer`, signed by their own
-//! wallet. The Vizier only mirrors market activity with suppliers and townsfolk
+//! Merchants trade goods between themselves through escrow: the seller's wallet locks
+//! goods for a named buyer at a fixed price (`offer_goods`) and the buyer's wallet pays
+//! and receives them in one transaction (`accept_goods`). Plain `mt_transfer` also works.
+//! The Vizier only mirrors market activity with suppliers and townsfolk
 //! (`sync_goods`: mint on wholesale purchase, burn on retail sale).
 //!
 //! The game server is the contract owner ("the Vizier"): it mints charters, writes

@@ -10,7 +10,8 @@
 //    (<slug>.<root>.testnet), which holds the house's working capital in NEAR;
 //  * goods are NEP-245 tokens in those wallets, mirrored from the market by the Vizier;
 //  * profits/losses settle every 5 days as NEAR transfers treasury <-> merchant wallet;
-//  * deals between houses: the seller's wallet signs mt_transfer, the buyer's wallet pays;
+//  * deals between houses go through escrow: the seller's wallet locks the goods for the buyer
+//    (offer_goods), the buyer's wallet pays and receives them in one transaction (accept_goods);
 //  * charter sales: the Vizier lists, the buyer's wallet calls buy_charter with the price attached.
 import { Account, JsonRpcProvider, FailoverRpcProvider, KeyPair, actions, nearToYocto, yoctoToNear } from 'near-api-js';
 import { readFileSync } from 'node:fs';
@@ -49,6 +50,9 @@ const acct = id => { if (!accounts.has(id)) accounts.set(id, new Account(id, pro
 const hashOf = r => r?.transaction?.hash || r?.transaction_outcome?.id;
 const yocto = gold => nearToYocto((Math.max(0, gold) * GOLD_TO_NEAR).toFixed(6));
 const fmtNear = gold => (gold * GOLD_TO_NEAR).toFixed(5);
+// escrow calls use well under 10 TGas; 30 TGas reserves about 0.03 NEAR of the caller's balance
+const DEAL_GAS = 30;
+const GAS_RESERVE = '0.04';
 
 // ---------- signing queues (testnet) ----------
 const queues = new Map();
@@ -71,7 +75,7 @@ const view = (method, args) => provider.callFunction({ contractId: CONTRACT, met
 export function makeChain(live) {
   live = live && testnetAvailable;
   const feed = [];
-  let mockSeq = 0;
+  let mockSeq = 0, dealSeq = 0;
   const mockHash = () => `sim-${(++mockSeq).toString(36).padStart(5, '0')}`;
   const push = (kind, text, hash) => {
     feed.unshift({ at: Date.now(), kind, text, hash: hash || null, url: live && hash ? `${EXPLORER}/txns/${hash}` : null });
@@ -91,9 +95,10 @@ export function makeChain(live) {
   const call = (signer, method, args, { deposit = 0n, gas = 100 } = {}) =>
     acct(signer).callFunctionRaw({ contractId: CONTRACT, methodName: method, args, deposit, gas: TGAS(gas) });
 
-  // make sure a wallet can afford `gold`; if not, the treasury lends the difference (visible on-chain)
-  async function ensureFunds(m, gold) {
-    const need = BigInt(yocto(gold)) + nearToYocto('0.01');
+  // make sure a wallet can afford `gold` plus `reserve` NEAR for fees (a function call reserves its
+  // full prepaid gas up front); if not, the treasury lends the difference (visible on-chain)
+  async function ensureFunds(m, gold, reserve = '0.01') {
+    const need = BigInt(yocto(gold)) + nearToYocto(reserve);
     const bal = await acct(m.wallet).getBalance();
     if (bal >= need) return;
     const r = await send(TREASURY, m.wallet, need - bal + nearToYocto('0.02'));
@@ -171,16 +176,29 @@ export function makeChain(live) {
       }, { gas: 150 }))));
     },
 
-    // goods deal between houses: seller's wallet signs mt_transfer, buyer's wallet pays the seller
+    // goods deal between houses, settled atomically through the contract's escrow:
+    // the seller's wallet locks the goods for this buyer at this price (offer_goods), then the
+    // buyer's wallet pays and receives them in one transaction (accept_goods).
     recordDeal(buyer, seller, good, qty, total, merchants) {
-      const text = `${seller.name}'s stall hands over ${qty} ${good}, signed by its own wallet.`;
-      const payText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)} coins (${fmtNear(total)} NEAR), wallet to wallet.`;
-      if (!live) { push('deal', text, mockHash()); push('pay', payText, mockHash()); return; }
-      // the Vizier first mirrors the seller's pre-deal stock so the on-chain balance exists
+      const lockText = `${seller.name}'s stall locks ${qty} ${good} in escrow for ${buyer.player ? 'you' : buyer.name}, signed by its own wallet.`;
+      const dealText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)} coins (${fmtNear(total)} NEAR) and receive${buyer.player ? '' : 's'} the ${good} in the same transaction.`;
+      if (!live) { push('escrow', lockText, mockHash()); push('deal', dealText, mockHash()); return; }
+      const offerId = `${seller.slug}-${buyer.slug}-${Date.now().toString(36)}-${(++dealSeq).toString(36)}`;
+      const price = yocto(total);
+      let locked = false;
+      // the Vizier first mirrors both houses' pre-deal stock so the seller's on-chain balance exists
       const pre = merchants.filter(m => m === buyer || m === seller).map(m => ({ account_id: m.wallet, token_id: good, amount: String(Math.floor(m.inventory[good] + (m === seller ? qty : -qty))) }));
       enqueue(ROOT, 'pre-deal sync', () => call(ROOT, 'sync_goods', { holdings: pre }))
-        .then(() => enqueue(seller.wallet, 'deal goods', async () => push('deal', text, hashOf(await call(seller.wallet, 'mt_transfer', { receiver_id: buyer.wallet, token_id: good, amount: String(qty), memo: `Bazaar deal: ${qty} ${good}` }, { deposit: 1n, gas: 30 })))));
-      enqueue(buyer.wallet, 'deal payment', async () => { await ensureFunds(buyer, total); push('pay', payText, hashOf(await send(buyer.wallet, seller.wallet, yocto(total)))); });
+        .then(() => enqueue(seller.wallet, 'escrow goods', async () => {
+          await ensureFunds(seller, 0, GAS_RESERVE);
+          push('escrow', lockText, hashOf(await call(seller.wallet, 'offer_goods', { offer_id: offerId, buyer_id: buyer.wallet, token_id: good, amount: String(qty), price: price.toString() }, { deposit: 1n, gas: DEAL_GAS })));
+          locked = true;
+        }))
+        .then(() => enqueue(buyer.wallet, 'accept deal', async () => {
+          if (!locked) return; // nothing in escrow, so nothing to pay for
+          await ensureFunds(buyer, total, GAS_RESERVE);
+          push('deal', dealText, hashOf(await call(buyer.wallet, 'accept_goods', { offer_id: offerId }, { deposit: price, gas: DEAL_GAS })));
+        }));
     },
 
     // charter sale: Vizier lists it, then the buyer's own wallet buys it with the price attached

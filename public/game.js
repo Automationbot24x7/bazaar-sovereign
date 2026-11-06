@@ -10,7 +10,7 @@ const STANCE_HINT = {
   premium: 'Few sales, fat margins, loyal rich customers.',
   liquidate: 'Dump stock for cash. Use when you’re about to go under.',
 };
-const FEED_ICON = { mint: '📜', wallet: '👛', transfer: '↩', goods: '⚖', update: '✎', settle: '🪙', deal: '🤝', pay: '🪙', listed: '🏷', takeover: '♛', loan: '🏦', error: '⚠' };
+const FEED_ICON = { mint: '📜', wallet: '👛', transfer: '↩', goods: '⚖', update: '✎', settle: '🪙', escrow: '🔒', deal: '🤝', pay: '🪙', listed: '🏷', takeover: '♛', loan: '🏦', error: '⚠' };
 const SPEEDS = [2500, 1200, 600];
 const dh = n => `${Math.round(n).toLocaleString()} coins`;
 let S = null, speedIdx = 0, prevBarks = {}, dealWith = null;

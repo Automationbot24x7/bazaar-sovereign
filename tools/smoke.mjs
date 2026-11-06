@@ -32,5 +32,5 @@ for (let round = 1; round <= 4 && !deal; round++) {
 if (deal) {
   console.log('waiting for chain…');
   for (let i = 0; i < 20; i++) { s = await api('/api/state'); if (!s.chain.pending) break; await sleep(2000); }
-  for (const f of s.chainFeed.filter(f => ['deal', 'pay', 'loan', 'error'].includes(f.kind)).slice(0, 4)) console.log(` ${f.kind}: ${f.text} ${f.url || f.hash || ''}`);
+  for (const f of s.chainFeed.filter(f => ['escrow', 'deal', 'pay', 'loan', 'error'].includes(f.kind)).slice(0, 4)) console.log(` ${f.kind}: ${f.text} ${f.url || f.hash || ''}`);
 }

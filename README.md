@@ -14,9 +14,11 @@ Players never see a wallet popup. The chain is underneath the game loop, not in 
 |---|---|
 | **Merchant charter** | A NEP-171 NFT on our contract (`contract/`). Metadata `extra` holds the live business: wallet, net worth, gold, stance, day, bankrupt, takeovers, absorbed charters. |
 | **Merchant wallet** | Each charter has its own NEAR sub-account (e.g. `kasim.<vizier>.testnet`) funded with working capital — *the NFT owns money*. |
-| **Profit & loss** | Every 5 game days, each merchant's P&L settles as a real NEAR transfer between the town treasury and the merchant's wallet (1 gold = 0.0001 NEAR). |
+| **Profit & loss** | Every 5 game days, each merchant's P&L settles as a real NEAR transfer between the town treasury and the merchant's wallet (1 coin = 0.00002 NEAR). |
 | **Dynamic NFT** | `update_charters` rewrites every charter's metadata with that day's net worth / stance / bankruptcy, emitting `EVENT_JSON` logs. |
-| **Takeover** | `takeover` moves a bankrupt charter NFT to the buyer and records it in the buyer's charter (`absorbed`); the price is paid wallet-to-wallet. |
+| **Goods** | Saffron, silk, tea and salt are NEP-245 multi-tokens held by the merchant wallets; the Vizier mirrors market buying and selling with `sync_goods`. |
+| **Deals between houses** | Atomic, through the contract's escrow: the seller's wallet locks the goods for one named buyer at a fixed price (`offer_goods`), then the buyer's wallet attaches the NEAR and receives the goods in the same transaction (`accept_goods`). Neither side can be left holding only half a deal. |
+| **Charter sales & takeovers** | The Vizier lists a distressed or agreed-sale charter (`list_charter`); the buyer's own wallet calls `buy_charter` with the price attached, so payment and NFT transfer happen together. The buyer's charter records the absorption. |
 
 The game server is the contract owner ("the Vizier") and acts as oracle. Every transaction appears in the in-game **On-chain** feed with a NearBlocks link.
 
@@ -57,17 +59,25 @@ npm start
 
 ## Contract
 
-`contract/src/lib.rs` — Rust, `near-sdk` 5.30 + `near-contract-standards` (NEP-171 core, NEP-177 metadata, NEP-181 enumeration).
+`contract/src/lib.rs` — Rust, `near-sdk` 5.30 + `near-contract-standards` (NEP-171 core, NEP-177 metadata, NEP-181 enumeration) plus NEP-245 goods.
 
 | Method | Who | What |
 |---|---|---|
-| `new(owner_id)` | deployer | sets the Vizier (game oracle) |
+| `new(owner_id, treasury_id)` | deployer | sets the Vizier (game oracle) and the town treasury |
+| `migrate()` | contract itself | one-time upgrade of v2 state (adds the escrow) |
 | `mint_charter(token_id, owner_id, name, wallet, persona, media)` | Vizier | mints a charter bound to a merchant wallet |
 | `update_charters(day, updates[])` | Vizier | batch-writes live business state into each NFT |
+| `list_charter(token_id, price, reason)` | Vizier | puts a charter up for sale |
+| `buy_charter(token_id, buyer_token_id)` | buyer's wallet | pays the listing price and takes the charter in one call |
 | `takeover(token_id, new_owner_id, price_gold, buyer_token_id)` | Vizier | moves a **bankrupt** charter to the buyer, records the absorption |
-| `get_charter(token_id)` · `nft_token` · `nft_tokens` · `nft_tokens_for_owner` · `nft_metadata` | anyone | views |
+| `sync_goods(holdings[])` | Vizier | mirrors market purchases and sales into goods balances |
+| `offer_goods(offer_id, buyer_id, token_id, amount, price)` | seller's wallet | locks goods in escrow for one buyer at a fixed price |
+| `accept_goods(offer_id)` | buyer's wallet | pays the price; goods to the buyer and NEAR to the seller, atomically |
+| `cancel_goods(offer_id)` | seller's wallet | takes back goods from an offer nobody accepted |
+| `mt_transfer` · `mt_batch_transfer` | goods holder | NEP-245 transfers |
+| `get_charter` · `get_listing` · `get_offer` · `mt_balance_of` · `mt_supply` · `nft_token` · `nft_tokens` · `nft_metadata` | anyone | views |
 
-Build & test (Linux/WSL): `cd contract && cargo test && cargo near build non-reproducible-wasm` → `contract/out/bazaar_charters.wasm`. Unit tests cover mint → update → takeover, oracle-only access, and refusing takeovers of solvent merchants.
+Build & test (Linux/WSL): `bash contract/build.sh` → `contract/out/bazaar_charters.wasm`. Twelve unit tests cover minting, updates and takeovers, oracle-only access, wallet-signed goods transfers, charter purchases, the escrow (atomic deal, wrong buyer, underpayment, cancel) and the v2 → v3 migration. Deploy or upgrade with `node --env-file=.env tools/deploy.mjs`.
 
 ## How the economy works
 
@@ -78,7 +88,7 @@ Each day: rumor → event; suppliers auction stock (highest bid first, reserve p
 ```
 server/engine.js   market simulation (pure, seeded, deterministic)
 server/brains.js   Claude merchant brains + player order parser (+ fallback)
-server/chain.js    NEAR: sub-account wallets, settlement transfers, charter mint/update/takeover
+server/chain.js    NEAR: sub-account wallets, settlements, goods mirror, escrowed deals, charter mint/update/sales
 server/index.js    game loop + HTTP API
 public/            game UI (vanilla JS, no build step)
 contract/          Rust NEP-171 charter contract + tests
