@@ -56,7 +56,7 @@
     const st = typeof S !== 'undefined' ? S : null; if (!st) return;
     const chain = st.chain || {};
     $('#inspNote').innerHTML = chain.contract
-      ? `Live table ${chain.table}: read just now from NEAR testnet, contract <a href="${chain.explorer}/address/${chain.contract}" target="_blank" rel="noopener">${esc(chain.contract)} ↗</a>. Nothing is signed from this window.`
+      ? `Live table ${chain.table}: read just now from NEAR testnet, contract <a href="${chain.explorer}/address/${chain.contract}" target="_blank" rel="noopener">${esc(chain.contract)} ↗</a>. Each charter's record is rewritten on chain every 5 days of play. Nothing is signed from this window.`
       : 'This is a practice table, so its chain entries are simulated. Start a new season while a live table is free to settle on NEAR testnet. The minds below are real either way.';
     $('#inspBody').innerHTML = '';
     for (const m of st.merchants) house(m, chain);

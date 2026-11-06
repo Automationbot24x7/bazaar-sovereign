@@ -35,16 +35,18 @@ CINE = lambda name: ('cine', f'art-src/cine/clips/{name}.mp4')   # animated pain
 BOARD = (160, 60)
 # day-stamped names change from season to season: take the first one with the prefix
 mk = lambda pre: next((m for m in marks if m.startswith(pre)), pre)
+# the opening board shot: the first moment the season is running (not the frozen day 0)
+RUNNING = next((m for m in marks if m.startswith('event-')), 'board-idle')
 st = lambda pre: next((f[:-4] for f in sorted(os.listdir(f'{CAP}/stills')) if f.startswith(pre)), pre)
 EVENT = next((m for m in ('event-caravan', 'event-festival', 'event-storm', 'event-monsoon', 'event-drought') if m in marks), None)
 s3_extra = [CLIP(EVENT, 1600, BOARD)] if EVENT else []
 wagon = [CLIP('magnate-wagon', 1600, BOARD)] if 'magnate-wagon' in marks else []
 SEGMENTS = [
-    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CINE('trailer-flyin'), CLIP('board-idle', 1600, BOARD)]),
-    ('s2', 'A charter NFT that does something', [STILL('00-board-day0', 1152, (0, 300), (768, 300)), ('nearblocks',)]),
+    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CINE('trailer-flyin'), CLIP(RUNNING, 1600, BOARD)]),
+    ('s2', 'A charter NFT that does something', [STILL(st('cry-verdict'), 1152, (0, 300), (768, 300)), CLIP('inspector', 1280, (320, 60))]),
     ('s3', 'Rivals that shout, scheme and hold grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1600, BOARD), CLIP(mk('decision-palace'), 1600, (160, 40))]),
     ('s4', 'Atomic deals through escrow', [STILL('haggle-reply', 960, (470, 262), (490, 282)), STILL('haggle-deal', 960, (480, 266), (480, 280))]),
-    ('s5', 'Day 6: the Magnate arrives', [CINE('trailer-arrival'), *wagon, STILL(st('decision-magnate'), 1440, (0, 100), (240, 140))]),
+    ('s5', 'Day 6: the Magnate arrives', [CINE('trailer-arrival'), STILL(st('decision-magnate'), 1440, (0, 100), (240, 140)), *wagon]),
     ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1600, (0, 40)), CINE('scene-wins')]),
     ('s7', 'Every move is on-chain', [CINE('scene-leaves'), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
     ('s8', 'Play free: bazaar.reconscribe.com', [CINE('trailer-festival'), STILL('end-screen', 960, (480, 245), (480, 262)), ('end',)]),
@@ -83,7 +85,8 @@ def cine_clip(out, secs, src, cap):
     run('-i', src, '-an', '-vf', vf, '-t', f'{secs}', '-r', str(FPS), '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', out)
 
 def intro_clip(out, secs):
-    vf = f"fps={FPS},tpad=stop_mode=clone:stop_duration=10,format=yuv420p"
+    # the 4 s Blender title, played faster to fit its short slot
+    vf = f"setpts={min(1.0, secs / 4.2):.4f}*PTS,fps={FPS},tpad=stop_mode=clone:stop_duration=10,format=yuv420p"
     run('-framerate', str(FPS), '-i', f'{V}/intro/intro_%04d.png', '-vf', vf, '-t', f'{secs}', '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', out)
 
 def nearblocks_clip(out, secs, cap):
@@ -112,7 +115,7 @@ for sid, cap, shots in SEGMENTS:
     d = dur(f'{V}/vo/{sid}.wav'); total = d + (2.8 if sid == 's8' else GAP)
     seg_start[sid] = t
     weights = [1.0 if s[0] != 'intro' else 0 for s in shots]
-    intro_len = 4.0 if shots[0][0] == 'intro' else 0
+    intro_len = 2.4 if shots[0][0] == 'intro' else 0   # a short title: judges should see the game within 3 s
     each = (total - intro_len) / max(1, sum(weights))
     for s in shots:
         length = intro_len if s[0] == 'intro' else each
