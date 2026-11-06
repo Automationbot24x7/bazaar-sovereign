@@ -1,0 +1,14 @@
+{
+  "voice": "Charon",
+  "style": "a warm, confident trailer narrator for a strategy game, brisk and clear, slight storyteller flourish",
+  "lines": [
+    { "id": "s1", "text": "Five merchant houses. One desert bazaar. And every merchant is an NFT that owns its own NEAR wallet." },
+    { "id": "s2", "text": "Your house is a charter on NEAR testnet. Its wallet holds real testnet NEAR, its stock is on-chain tokens, and its record changes as the business lives or dies." },
+    { "id": "s3", "text": "Four rival houses think for themselves. They read the rumors, race you for Palace orders, and remember who insulted them." },
+    { "id": "s4", "text": "Haggle with any of them. Every deal settles through an escrow contract: goods and payment move in one transaction." },
+    { "id": "s5", "text": "Then, on day six, a magnate arrives with deep pockets and no goodwill. He sells below cost until the bazaar breaks. <short pause> Then he owns it." },
+    { "id": "s6", "text": "So fight back. Rally the rivals into a pact, buy off his carts, borrow from the Moneylenders' Guild, and keep your customers loyal." },
+    { "id": "s7", "text": "Make it not worth his gold, and he leaves. Every loan, deal and takeover along the way is a real transaction." },
+    { "id": "s8", "text": "Seize three charters, and become Sovereign of the Bazaar. <short pause> Play free at bazaar dot reconscribe dot com." }
+  ]
+}

@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 HOST=${DEPLOY_HOST:-bazaar_r1@190.92.174.232}
 KEY=${DEPLOY_KEY:-$HOME/.ssh/bazaar_deploy}
 tar czf - package.json package-lock.json server public node_modules \
-  | ssh -i "$KEY" -o BatchMode=yes "$HOST" 'mkdir -p ~/bazaar/data && tar xzf - -C ~/bazaar && pkill -u "$(whoami)" -f "server/index.js" || true'
+  | ssh -i "$KEY" -o BatchMode=yes "$HOST" 'mkdir -p ~/bazaar/data && tar xzf - -C ~/bazaar && pkill -u "$(whoami)" -f "node.*server/index[.]js" || true'
 for i in $(seq 1 30); do
   curl -fsS --max-time 5 https://bazaar.reconscribe.com/healthz && { echo; echo "live"; exit 0; }
   sleep 2

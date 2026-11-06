@@ -157,7 +157,7 @@ function header() {
       : S.liveTables ? `<b>Practice table.</b> ${lost}A live NEAR table is free: start a new season to play on-chain.`
       : '<b>Practice table.</b> On-chain entries are simulated.';
   }
-  $('#foot').innerHTML = S.chain.mode === 'testnet' ? `Contract <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">${S.chain.contract}</a> · Treasury <a href="${S.chain.explorer}/address/${S.chain.treasury}" target="_blank" rel="noopener">${S.chain.treasury}</a> · 1 gold = ${S.chain.goldToNear} NEAR` : 'Bazaar Sovereign · built for NEAR HACKATHON 2026';
+  $('#foot').innerHTML = S.chain.mode === 'testnet' ? `Contract <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">${S.chain.contract}</a> · Treasury <a href="${S.chain.explorer}/address/${S.chain.treasury}" target="_blank" rel="noopener">${S.chain.treasury}</a> · 1 coin = ${S.chain.goldToNear} NEAR` : 'Bazaar Sovereign · built for NEAR HACKATHON 2026';
 }
 
 let endShown = false;
@@ -179,7 +179,7 @@ function decision() {
   const d = S.decision, el = $('#decision');
   el.hidden = !d;
   if (!d) return;
-  el.className = `decision ${d.kind}`;
+  el.className = `decision kind-${d.kind}`; // prefixed: bare "palace" or "magnate" would pick up those panels' styles
   el.innerHTML = `<div class="dt">${esc(d.title)} <span class="muted">· day ${d.day}, the bazaar waits for you</span></div><p>${esc(d.text)}</p><div class="da">${d.actions.map((a, i) => `<button class="${i === 0 ? 'primary' : 'ghost'}" data-i="${i}">${esc(a.label)}</button>`).join('')}</div>`;
 }
 
