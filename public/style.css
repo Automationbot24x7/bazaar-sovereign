@@ -177,7 +177,7 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 /* ---------- v4: the Magnate, the Guild, rats ---------- */
 .magnate { padding: 10px 20px; background: linear-gradient(90deg, #3a130d, #2a1a10); border-bottom: 1px solid #a3402c; font-size: 13px; display: grid; gap: 6px; }
 .magnate.coming, .magnate.gone { display: block; background: #2b2118; border-bottom-color: var(--line); color: var(--parch); }
-.magnate.gouging { background: linear-gradient(90deg, #3a2a0d, #2a1a10); border-bottom-color: var(--gold); }
+.magnate.monopoly { background: linear-gradient(90deg, #3a2a0d, #2a1a10); border-bottom-color: var(--gold); }
 .magnate b { color: var(--gold); }
 .magnate .mh { font-size: 14px; }
 .magnate .patience { display: flex; gap: 10px; align-items: center; }
@@ -191,3 +191,10 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 button.danger { border-color: var(--red); color: #ffcfbf; }
 .feed li.magnate { color: #ffb38f; } .feed li.guild { color: var(--blue); }
 .decision.magnate { border-color: #a3402c; }
+
+.magnate .bar.share i { background: linear-gradient(90deg, #a3402c, #e0614a); }
+.heal { color: var(--green); font-style: normal; font-weight: 700; }
+.owned.held { color: #ffb38f; }
+.goodwill { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); }
+.goodwill i { flex: 1; height: 4px; background: #3a2b1f; border-radius: 4px; overflow: hidden; }
+.goodwill b { display: block; height: 100%; background: #e07a9a; }

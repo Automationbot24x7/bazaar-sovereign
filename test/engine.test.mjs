@@ -21,7 +21,7 @@ test('a season ends on day 30 with standings', () => {
   for (let i = 0; i < 40 && !w.over; i++) step(w);
   assert.equal(w.over, true);
   assert.equal(w.day, SEASON_DAYS);
-  assert.equal(w.result.reason, 'season');
+  assert.ok(['season', 'magnate'].includes(w.result.reason), w.result.reason);
   assert.equal(w.result.table.length, 4);
 });
 
@@ -122,7 +122,7 @@ test('reserved Palace stock does not spoil; half an order earns a partial reward
 
 const until = (w, day) => { while (w.day < day && !w.over) step(w); };
 
-test('the Magnate arrives on day 6, sells two goods below cost and leaves once he has lost his patience', () => {
+test('the Magnate arrives on day 6, sells two goods below cost, and either leaves or owns the bazaar', () => {
   const w = world(5);
   until(w, MAGNATE.rumorDay);
   assert.equal(w.magnate.stage, 'coming');
@@ -131,8 +131,9 @@ test('the Magnate arrives on day 6, sells two goods below cost and leaves once h
   assert.equal(mg.stage, 'dumping');
   assert.equal(mg.goods.length, 2);
   until(w, SEASON_DAYS);
-  assert.ok(['gone', 'gouging'].includes(mg.stage), `stage ${mg.stage}`);
+  assert.ok(['gone', 'monopoly', 'dumping'].includes(mg.stage), `stage ${mg.stage}`);
   if (mg.stage === 'gone' && mg.why === 'bled') assert.ok(mg.loss >= MAGNATE.patience);
+  if (mg.stage === 'monopoly') assert.equal(w.result.reason, 'magnate');
 });
 
 test('buying off the Magnate\'s carts is capped, delivered overnight and costs him patience', () => {
@@ -195,4 +196,37 @@ test('a hostile rival\'s rats are telegraphed; a night watch stops them, otherwi
     if (watch) assert.match(w.news.map(n => n.text).join(' '), /night watch caught/);
     else assert.ok(me.inventory.saffron <= before - 10 + 2, `rats ate saffron (${before} -> ${me.inventory.saffron})`);
   }
+});
+
+test('during the price war the Magnate seizes a bankrupt charter a day later, and fire-sells it when he leaves', () => {
+  const w = world(9);
+  until(w, MAGNATE.arriveDay);
+  const b = M(w, 'b');
+  b.gold = -500; b.inventory = { saffron: 0, silk: 0, tea: 0, salt: 0 }; b.persona = 'hates debt';
+  step(w); // b goes bankrupt tonight
+  assert.equal(b.bankrupt, true);
+  assert.ok(!b.magnateHeld, 'the player gets a day to seize it first');
+  step(w);
+  assert.equal(b.magnateHeld, true);
+  assert.deepEqual(w.magnate.charters, ['b']);
+  assert.throws(() => takeover(w, M(w, 'you'), b), /holds that charter/);
+  w.magnate.loss = MAGNATE.patience; // bleed him dry
+  step(w);
+  assert.equal(w.magnate.stage, 'gone');
+  assert.equal(b.magnateHeld, false, 'fire sale');
+  M(w, 'you').gold = 2000;
+  takeover(w, M(w, 'you'), b);
+  assert.equal(b.ownedBy, 'you');
+});
+
+test('goodwill grows with fair trade and keeps shoppers loyal', () => {
+  const w = world(2);
+  const me = M(w, 'you');
+  for (let i = 0; i < 4; i++) step(w);
+  assert.ok(me.goodwill >= 0 && me.goodwill <= 0.8);
+  const before = me.goodwill;
+  me.doctrine = { stance: 'steady', focus: null, aggression: 0.3 };
+  me.inventory.salt = 60; me.cost.salt = 3;
+  step(w);
+  assert.ok(me.goodwill >= before - 0.03, `goodwill ${before} -> ${me.goodwill}`);
 });

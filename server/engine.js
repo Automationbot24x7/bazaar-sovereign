@@ -45,7 +45,7 @@ export function createWorld({ seed = 7, merchants }) {
     news: [],          // [{day,text,kind}]
     merchants: merchants.map(m => ({
       gold: 300, inventory: Object.fromEntries(GOODS.map(g => [g.id, 0])), cost: Object.fromEntries(GOODS.map(g => [g.id, 0])),
-      sales: {}, bankrupt: false, netHistory: [300], lastPnl: 0,
+      sales: {}, bankrupt: false, netHistory: [300], lastPnl: 0, goodwill: 0.2,
       doctrine: { stance: 'steady', focus: null, aggression: 0.5 }, bark: '', ...m,
     })),
     ledger: [],        // per-day settlement rows for the chain layer
@@ -221,11 +221,12 @@ export function step(w) {
 
   for (const g of GOODS) {
     const hisGood = mg && mg.goods.includes(g.id);
-    if (hisGood) { mg.stall.inventory[g.id] = MAGNATE.shelf; mg.stall.lastAsk = { ...mg.stall.lastAsk, [g.id]: magnatePrice(w, g.id) }; }
+    if (hisGood) { mg.stall.inventory[g.id] = shelfOf(mg, g.id); mg.stall.lastAsk = { ...mg.stall.lastAsk, [g.id]: magnatePrice(w, g.id) }; }
     const book = alive.map(m => ({ m, ...orders(w, m, g, [...alive.filter(r => r !== m), ...(hisGood ? [mg.stall] : [])]) }));
-    if (hisGood) book.push({ m: mg.stall, buyQty: 0, maxBid: 0, ask: magnatePrice(w, g.id), sellCap: MAGNATE.shelf });
+    if (hisGood) book.push({ m: mg.stall, buyQty: 0, maxBid: 0, ask: magnatePrice(w, g.id), sellCap: shelfOf(mg, g.id) });
     // ---- wholesale: pay-as-bid, highest bidder first ----
     let supply = Math.round(g.supply * sup[g.id] * (0.85 + w.rand() * 0.3));
+    if (hisGood && mg.stage === 'monopoly') supply = Math.round(supply * (1 - MAGNATE.monopolySupply)); // he buys up the caravans
     const reserve = g.base * 0.58; // suppliers won't sell below this
     for (const b of [...book].sort((x, y) => y.maxBid - x.maxBid)) {
       if (!supply || !b.buyQty || b.maxBid < reserve) continue;
@@ -251,6 +252,10 @@ export function step(w) {
       q = Math.floor(q);
       if (q <= 0) return 0;
       sold += q; revenue += q * b.ask; b.m.servedToday = (b.m.servedToday || 0) + q;
+      if (b.m.id !== 'magnate') {
+        if (b.ask > g.base * 1.6 && b.m.doctrine.stance !== 'premium') b.m.gouged = true;
+        else if (b.ask <= w.prices[g.id] * 1.05) b.m.fair = true; // at or below the going price
+      }
       const net = q * b.ask * (1 - BAZAAR_TAX);
       b.m.inventory[g.id] -= q; b.m.gold += net; pnl[b.m.id] += net;
       trades.push({ day: w.day, merchant: b.m.id, side: 'sell', good: g.id, qty: q, price: b.ask });
@@ -259,7 +264,8 @@ export function step(w) {
     const avail = b => Math.max(0, Math.min(b.m.inventory[g.id] - reserved(w, b.m, g.id), capacity(b.m) - (b.m.servedToday || 0)));
     for (const b of book) b.m.lastAsk = { ...(b.m.lastAsk || {}), [g.id]: b.ask };
     let sellers = book.filter(b => avail(b) > 0 && b.ask < choke);
-    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.45 : 1);
+    // goodwill: loyal shoppers stick with a stall that has treated them fairly (the Magnate has none)
+    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.45 : 1) * (b.m.id === 'magnate' ? magnateWeight(mg) : 1 + (b.m.goodwill || 0));
     if (sellers.length) {
       const W0 = sellers.reduce((t, b) => t + weight(b), 0);
       const pAvg = sellers.reduce((t, b) => t + b.ask * weight(b), 0) / W0;
@@ -273,13 +279,25 @@ export function step(w) {
         if (!served) break;
       }
     }
-    if (hisGood) { const his = MAGNATE.shelf - mg.stall.inventory[g.id]; mg.today.sold += his; mg.today.houses += sold - his; mg.today[g.id] = his; }
+    if (hisGood) {
+      const shelf = shelfOf(mg, g.id), his = shelf - mg.stall.inventory[g.id];
+      mg.today.sold += his; mg.today.houses += sold - his; mg.today[g.id] = his; mg.today.lostValue = (mg.today.lostValue || 0) + (sold - his) * g.base;
+      // holding most of the shoppers means it is working: he brings more caravans tomorrow
+      if (his >= (sold - his) && his >= shelf * 0.6) mg.shelf[g.id] = Math.min(MAGNATE.shelfMax, (mg.shelf[g.id] || MAGNATE.shelf) + MAGNATE.shelfGrow);
+    }
     // market price = volume-weighted ask, or drifts up when nobody sells (scarcity)
     const unmet = A > 0 && sold === 0;
     const px = sold ? revenue / sold : w.prices[g.id] * (unmet ? 1.12 : 1);
     w.prices[g.id] = +(w.prices[g.id] * 0.4 + px * 0.6).toFixed(2);
     w.history[g.id].push(w.prices[g.id]);
     if (w.history[g.id].length > 120) w.history[g.id].shift();
+  }
+
+  // goodwill: fair trade earns it, gouging and empty shelves lose it
+  for (const m of alive) {
+    const before = m.goodwill ?? 0.2;
+    m.goodwill = +Math.min(0.8, Math.max(0, before + (m.gouged ? -0.06 : m.fair ? 0.02 : m.servedToday > 0 ? 0 : -0.03))).toFixed(3);
+    m.gouged = false; m.fair = false;
   }
 
   // coins spent off the Magnate's carts (or on a night watch) count in the day's books
@@ -316,7 +334,7 @@ export function step(w) {
     m.lastPnl = +pnl[m.id].toFixed(2);
     m.gold = +m.gold.toFixed(2);
     if (m.gold < 0) {
-      m.bankrupt = true;
+      m.bankrupt = true; m.bankruptDay = w.day;
       m.bark = 'My stall… my ledger… ruined!';
       log(w, `${m.name} is BANKRUPT. Their merchant charter is up for takeover.`, 'bankrupt');
       if (m.bonds?.length) {
@@ -360,6 +378,7 @@ export function takeoverPrice(w, target) {
 export function takeover(w, buyer, target) {
   const price = takeoverPrice(w, target);
   if (!target.bankrupt || target.ownedBy) throw new Error('Only unclaimed bankrupt charters can be taken over');
+  if (target.magnateHeld) throw new Error(`${MAGNATE.name} holds that charter now`);
   const capital = Math.round(Math.max(80, price * 0.6)); // the new owner reopens the stall with working capital
   if (buyer.gold < price + capital) throw new Error(`You need ${Math.round(price + capital)} coins (${price} for the charter, ${capital} to reopen the stall)`);
   buyer.gold -= price + capital;
@@ -383,13 +402,14 @@ export function checkSeason(w) {
   let reason = null;
   if (me && me.bankrupt) reason = 'bankrupt';
   else if (me && chartersOwned(w, me) >= 3) reason = 'sovereign';
-  else if (w.day >= SEASON_DAYS) reason = 'season';
+  else if (w.day >= SEASON_DAYS) reason = w.magnate?.stage === 'monopoly' ? 'magnate' : 'season';
   if (!reason) return;
   const table = standings(w);
   const rank = table.findIndex(r => r.id === me?.id) + 1;
   w.over = true;
-  w.result = { reason, rank, table, day: w.day, win: reason === 'sovereign' || (reason === 'season' && rank === 1) };
-  log(w, reason === 'sovereign' ? `${me.name} now holds three charters and is crowned SOVEREIGN OF THE BAZAAR!` : reason === 'bankrupt' ? 'Your house has fallen. The season is over.' : `The season ends. ${table[0].name} is the richest house in the bazaar.`, 'event');
+  w.result = { reason, rank, table, day: w.day, win: reason === 'sovereign' || (reason === 'season' && rank === 1), magnate: reason === 'magnate' ? { goods: w.magnate.goods, charters: w.magnate.charters.length } : null };
+  log(w, reason === 'sovereign' ? `${me.name} now holds three charters and is crowned SOVEREIGN OF THE BAZAAR!` : reason === 'bankrupt' ? 'Your house has fallen. The season is over.'
+    : reason === 'magnate' ? `The season ends with ${MAGNATE.name} holding a monopoly on ${nameList(w.magnate.goods)}. The bazaar belongs to the Golden Caravan Company.` : `The season ends. ${table[0].name} is the richest house in the bazaar.`, 'event');
 }
 
 // ---------- deals (negotiation) ----------
@@ -488,11 +508,11 @@ export function rivalPreparations(w) {
 
 // ---------- the Magnate: a rich outsider who sells below cost until it stops paying ----------
 // He arrives on day 6 (a rumor the day before), picks the two goods with the fattest margins and
-// sells them under the bazaar's own wholesale price, swallowing the loss. Every coin he loses
-// wears down his patience; when it runs out he decides the bazaar is not worth it and leaves.
-// If instead the houses abandon his goods (or two of them go bankrupt), he owns those markets
-// and switches to gouging until someone undercuts him. Houses can buy off his carts (capped,
-// delivered overnight): every unit bought below his cost is his loss.
+// sells them under the bazaar's own wholesale price. Losing money to shoppers is his plan; what
+// wears down his patience is overhead, stock bought off his carts (capped, delivered overnight)
+// and stock left unsold because houses with goodwill kept their customers. Unopposed he grows,
+// seizes bankrupt charters and takes a MONOPOLY: then he buys up the supply, prices high and
+// owns the bazaar at season's end unless the houses win their shoppers back.
 export const MAGNATE = {
   name: 'Baltazar', title: 'Magnate Baltazar of the Golden Caravan Company',
   rumorDay: 5, arriveDay: 6,
@@ -501,12 +521,22 @@ export const MAGNATE = {
   importCost: 0.68,  // his landed cost, x base price
   dumpPrice: 0.55,   // his shelf price while dumping, x base price
   rushCost: 0.85,    // what it costs him to rush in a caravan to replace stock bought off his carts, x base
-  gougePrice: 1.6,   // his shelf price once he owns a market
-  shelf: 10,         // units of each of his goods he puts out for shoppers each day
+  monopolyPrice: 1.0, // his shelf price once he owns a market, x base
+  monopolySupply: 0.65, // share of the wholesale supply of his goods he buys up during a monopoly
+  breakShare: 0.6, breakDays: 4, // houses break a monopoly by winning back this share of shoppers for this many days
+  shelf: 10,         // units of each of his goods he starts with on his shelf each day
+  shelfGrow: 4,      // more caravans each day he holds most of the shoppers
+  shelfMax: 30,
+  charterShelf: 10,  // extra shelf per seized charter
+  lostShopper: 0.08, // patience lost for each unit of his goods a house sells instead of him, x base
+  monopolyAt: 0.3, // houses' share of his goods' shoppers below which (2 days running) he holds a monopoly
+  reachMax: 3,       // how far his name, criers and crowds can multiply his pull on shoppers
   raidCap: 8,        // units any one house may buy off his carts per day
 };
-const magnateSelling = w => ['dumping', 'gouging'].includes(w.magnate?.stage);
-export const magnatePrice = (w, good) => +(G[good].base * (w.magnate?.stage === 'gouging' ? MAGNATE.gougePrice : MAGNATE.dumpPrice)).toFixed(2);
+const magnateSelling = w => ['dumping', 'monopoly'].includes(w.magnate?.stage);
+export const magnatePrice = (w, good) => +(G[good].base * (w.magnate?.stage === 'monopoly' ? MAGNATE.monopolyPrice : MAGNATE.dumpPrice)).toFixed(2);
+const magnateWeight = mg => mg?.reach || 1;
+const shelfOf = (mg, good) => (mg.shelf?.[good] || MAGNATE.shelf) + (mg.charters?.length || 0) * MAGNATE.charterShelf;
 const nameList = goods => goods.map(g => G[g].name.toLowerCase()).join(' and ');
 
 function magnateMorning(w) {
@@ -520,7 +550,7 @@ function magnateMorning(w) {
     const margin = g => (w.prices[g.id] - g.base * 0.62) * g.demand;
     const goods = [...GOODS].sort((a, b) => margin(b) - margin(a)).slice(0, 2).map(g => g.id);
     Object.assign(mg, {
-      stage: 'dumping', goods, loss: 0, arrived: w.day, allies: [], declined: [], quiet: 0, slow: 0, lastLoss: 0, hits: [],
+      stage: 'dumping', goods, loss: 0, arrived: w.day, allies: [], declined: [], quiet: 0, back: 0, lastLoss: 0, hits: [], charters: [], shelf: {}, share: 0,
       fallenBefore: w.merchants.filter(m => m.bankrupt).length,
       stall: { id: 'magnate', name: MAGNATE.name, inventory: Object.fromEntries(GOODS.map(g => [g.id, 0])), cost: {}, gold: 0, helpers: 20, doctrine: { stance: 'steady', focus: null, aggression: 0.5 }, servedToday: 0, lastAsk: {} },
     });
@@ -531,22 +561,42 @@ function magnateMorning(w) {
 function magnateEvening(w) {
   const mg = w.magnate;
   if (!magnateSelling(w) || !mg.today) return;
-  const cost = mg.goods.reduce((t, g) => t + (mg.today[g] || 0) * G[g].base * MAGNATE.importCost, 0);
-  const day = cost - mg.stall.gold + MAGNATE.overhead; // positive = a losing day
-  mg.loss = Math.max(0, mg.loss + day);
-  mg.lastLoss = Math.round(day);
-  const share = mg.today.houses / Math.max(1, mg.today.houses + mg.today.sold);
+  const before = mg.loss;
+  // shoppers buying his cheap goods is planned marketing spend; what wears his patience down is
+  // overhead, stock bought off his carts (counted when it happens) and every shopper a house kept
+  let drain = MAGNATE.overhead + (mg.today.lostValue || 0) * MAGNATE.lostShopper;
+  if (mg.stage === 'monopoly') {
+    const landed = mg.goods.reduce((t, g) => t + (mg.today[g] || 0) * G[g].base * MAGNATE.importCost, 0);
+    drain -= mg.stall.gold - landed; // monopoly profits refill his patience
+  }
+  mg.loss = Math.max(0, mg.loss + drain);
+  mg.lastLoss = Math.round(mg.loss - before);
+  const houseShare = mg.today.houses / Math.max(1, mg.today.houses + mg.today.sold);
+  mg.share = +(1 - houseShare).toFixed(2);
+  // winning makes him louder; losing shoppers makes him look like what he is
+  mg.reach = +Math.min(MAGNATE.reachMax, Math.max(1, (mg.reach || 1) + (mg.share >= 0.5 ? 0.3 : -0.2))).toFixed(2);
+  seizeCharters(w);
+  if (mg.loss >= MAGNATE.patience) return magnateLeaves(w, 'bled');
   if (mg.stage === 'dumping') {
-    if (mg.loss >= MAGNATE.patience) return magnateLeaves(w, 'bled');
-    mg.quiet = share < 0.15 ? mg.quiet + 1 : 0;
-    const fallen = w.merchants.filter(m => m.bankrupt).length - mg.fallenBefore;
-    if (mg.quiet >= 2 || fallen >= 2) {
-      mg.stage = 'gouging';
-      log(w, `The houses have given up on ${nameList(mg.goods)}. ${MAGNATE.name} owns those markets now and raises his prices sharply.`, 'magnate');
+    mg.quiet = houseShare < MAGNATE.monopolyAt ? mg.quiet + 1 : 0;
+    if (mg.quiet >= 2 || mg.charters.length >= 2) {
+      mg.stage = 'monopoly'; mg.back = 0;
+      log(w, `${MAGNATE.name} now holds a MONOPOLY on ${nameList(mg.goods)}. He buys up the caravans and raises his prices. Win back the shoppers or he owns the bazaar at season's end.`, 'magnate');
     }
   } else {
-    mg.slow = mg.today.sold < 3 ? mg.slow + 1 : 0;
-    if (mg.slow >= 2) magnateLeaves(w, 'undercut');
+    mg.back = houseShare >= MAGNATE.breakShare ? mg.back + 1 : 0;
+    if (mg.back >= MAGNATE.breakDays) magnateLeaves(w, 'broken');
+  }
+}
+
+// A house that goes bankrupt while he is in town: unless someone seizes its charter within a day, he does.
+function seizeCharters(w) {
+  const mg = w.magnate;
+  for (const t of w.merchants.filter(m => m.bankrupt && !m.player && !m.ownedBy && !m.magnateHeld && m.bankruptDay != null && w.day - m.bankruptDay >= 1)) {
+    t.magnateHeld = true;
+    mg.charters.push(t.id);
+    (w.magnateLog ||= []).push({ kind: 'seize', id: t.id, price: takeoverPrice(w, t) });
+    log(w, `${MAGNATE.name} buys ${t.name}'s charter for a pittance. Its customers now crowd his stall.`, 'magnate');
   }
 }
 
@@ -554,8 +604,15 @@ function magnateLeaves(w, why) {
   const mg = w.magnate;
   mg.stage = 'gone'; mg.left = w.day; mg.why = why;
   log(w, why === 'bled'
-    ? `${MAGNATE.name} has lost ${Math.round(mg.loss)} coins in this stubborn bazaar. He packs his caravans and leaves: it is not worth his gold.`
-    : `Nobody pays ${MAGNATE.name}'s prices any more. He packs his caravans and leaves the bazaar.`, 'magnate');
+    ? `${MAGNATE.name} has lost ${Math.round(mg.loss)} coins of patience in this stubborn bazaar. He packs his caravans and leaves: it is not worth his gold.`
+    : `The houses have won their customers back. ${MAGNATE.name}'s monopoly is broken; he packs his caravans and leaves.`, 'magnate');
+  // fire sale: the charters he seized are up for grabs again
+  for (const id of mg.charters) {
+    const t = w.merchants.find(m => m.id === id);
+    if (!t) continue;
+    t.magnateHeld = false; t.bankruptDay = w.day;
+    log(w, `${t.name}'s charter goes to a fire sale as ${MAGNATE.name} leaves.`, 'takeover');
+  }
 }
 
 // Buy cheap stock off the Magnate's carts while he is dumping: capped per house per day, delivered overnight.
@@ -657,7 +714,7 @@ function ratsMorning(w) {
       const g = [...PERISHABLE].sort((a, b) => spare(b) * w.prices[b] - spare(a) * w.prices[a])[0];
       const q = Math.floor(spare(g) * 0.25);
       if (q > 0) {
-        t.inventory[g] -= q;
+        t.inventory[g] -= q; t.goodwill = Math.max(0, (t.goodwill || 0) - 0.1); // word gets round
         log(w, `Rats in ${t.player ? 'your' : t.name + "'s"} warehouse! ${q} ${q === 1 ? G[g].unit : G[g].units} of ${G[g].name.toLowerCase()} ruined. ${by.name} hides a smile.`, 'bankrupt');
         by.bark = `Such a shame about your ${G[g].name.toLowerCase()}. Rats are everywhere these days.`;
         w.lastRats = { day: w.day, by: by.id, target: t.id, good: g, qty: q };

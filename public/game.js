@@ -36,7 +36,8 @@ function stalls() {
       ${m.chips?.length ? `<div class="chips">${m.chips.map(c => `<span class="chip ${c.tone}">${esc(c.text)}</span>`).join('')}</div>` : ''}
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>Charter NFT</span>${m.walletUrl ? `<a href="${m.walletUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="This stall's own NEAR wallet">${esc(m.wallet)} ↗</a>` : `<span title="This stall's own wallet">${esc(m.wallet || '')}</span>`}</div>
-      ${m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}
+      ${m.magnateHeld ? `<div class="owned held">🐫 Charter held by ${esc(S.magnate?.name || 'the Magnate')}</div>` : m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}
+      ${m.trading ? `<div class="goodwill" title="Goodwill: shoppers stay loyal to stalls that trade fairly. Gouging, empty shelves and rats lose it."><span>♥ Goodwill</span><i><b style="width:${Math.round((m.goodwill / 0.8) * 100)}%"></b></i></div>` : ''}
       ${owner ? `<div class="owned">♛ Vassal of ${owner.player ? 'your house' : esc(owner.name)} · pays ${owner.player ? 'you' : 'them'} 20% of its profit</div>` : ''}
       ${m.tribute ? `<div class="owned">Vassals have paid ${m.player ? 'you' : 'this house'} ${dh(m.tribute)}</div>` : ''}
     </article>`;
@@ -159,8 +160,9 @@ function end() {
   if (endShown) return;
   endShown = true;
   const r = S.result;
-  $('#endTitle').textContent = r.reason === 'sovereign' ? '♛ Sovereign of the Bazaar ♛' : r.reason === 'bankrupt' ? 'Your house has fallen' : r.win ? 'Richest house in the bazaar!' : 'The season ends';
-  $('#endText').textContent = r.reason === 'sovereign' ? `You hold three merchant charters on day ${r.day}. The bazaar is yours.` : r.reason === 'bankrupt' ? 'Your gold ran out. Rivals circle your charter.' : `You finished #${r.rank} of ${r.table.length} after ${r.day} days.`;
+  $('#endTitle').textContent = r.reason === 'sovereign' ? '♛ Sovereign of the Bazaar ♛' : r.reason === 'bankrupt' ? 'Your house has fallen' : r.reason === 'magnate' ? '🐫 The Magnate owns the bazaar' : r.win ? 'Richest house in the bazaar!' : 'The season ends';
+  $('#endText').textContent = r.reason === 'sovereign' ? `You hold three merchant charters on day ${r.day}. The bazaar is yours.` : r.reason === 'bankrupt' ? 'Your gold ran out. Rivals circle your charter.'
+    : r.reason === 'magnate' ? `${S.magnate?.name || 'The Magnate'} still holds his monopoly on ${(r.magnate?.goods || []).map(g => goodName(g).toLowerCase()).join(' and ')}. The houses squabbled while he bought the bazaar; nobody wins this season. (You were #${r.rank} by net worth.)` : `You finished #${r.rank} of ${r.table.length} after ${r.day} days.`;
   $('#endTable').innerHTML = '<tr><th>#</th><th>House</th><th>Net worth</th><th>Charters</th><th>Palace orders</th></tr>' + r.table.map((t, i) => `<tr class="${t.id === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${esc(t.name)}${t.vassalOf ? ` <span class="muted">(vassal of ${esc(merchant(t.vassalOf).name)})</span>` : t.out ? ' <span class="muted">(bankrupt)</span>' : ''}</td><td>${dh(t.netWorth)}</td><td>${'♛'.repeat(t.charters)}</td><td>${t.contracts}</td></tr>`).join('');
   $('#endProof').innerHTML = S.chain.mode === 'testnet' ? `The final state is settling on NEAR testnet — <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">see the charters ↗</a>` : '';
   $('#end').showModal();
@@ -358,7 +360,8 @@ function magnate() {
   el.innerHTML = `<div class="mh">🐫 <b>${esc(mg.name)}</b> ${mg.stage === 'dumping'
       ? `is dumping ${mg.goods.map(g => `${gname(g)} at <b>${mg.prices[g]}</b>`).join(' and ')} coins, below his own cost.`
       : `owns the ${mg.goods.map(gname).join(' and ')} markets and charges ${mg.goods.map(g => `<b>${mg.prices[g]}</b>`).join(' / ')}. Undercut him and he leaves.`}</div>
-    <div class="patience" title="He leaves when his losses reach ${mg.patience} coins"><span>Patience</span><div class="bar"><i style="width:${pct}%"></i></div><span>${dh(left)} left${mg.lastLoss > 0 ? ` <em class="hit">−${mg.lastLoss} yesterday</em>` : ''}</span></div>
+    <div class="patience" title="He leaves when his patience runs out. Shoppers who stay loyal to the houses, stock bought off his carts and his overheads wear it down; monopoly profits refill it."><span>Patience</span><div class="bar"><i style="width:${pct}%"></i></div><span>${dh(left)} left${mg.lastLoss > 0 ? ` <em class="hit">−${mg.lastLoss} yesterday</em>` : mg.lastLoss < 0 ? ` <em class="heal">+${-mg.lastLoss} yesterday</em>` : ''}</span></div>
+    <div class="patience" title="Share of shoppers for his goods who bought from him yesterday"><span>His shoppers</span><div class="bar share"><i style="width:${Math.round(mg.share * 100)}%"></i></div><span>${Math.round(mg.share * 100)}%${mg.stage === 'dumping' ? ` · at ${Math.round((1 - mg.monopolyAt) * 100)}% for 2 days he takes a monopoly` :` · houses need ${Math.round(mg.breakShare * 100)}% for ${mg.breakDays} days (${mg.back}/${mg.breakDays})`}${mg.charters.length ? ` · holds ${mg.charters.map(esc).join(', ')}` : ''}</span></div>
     ${mg.stage === 'dumping' ? `<div class="mrow"><span class="muted">Buy off his carts (${mg.raidLeft} of ${mg.raidCap} left today, delivered overnight${mg.incoming ? ` · ${mg.incoming} on the way` : ''}):</span>
       ${mg.goods.map(g => { const n = Math.min(mg.raidLeft, Math.floor(S.me.gold / mg.prices[g])); return `<button class="primary" data-raid="${g}" ${n ? '' : 'disabled'} title="${n ? '' : 'Not enough coins in the till: borrow from the Guild below'}">Buy ${n || mg.raidLeft || mg.raidCap} ${gname(g)} · ${dh(mg.prices[g] * (n || mg.raidLeft || mg.raidCap))}</button>`; }).join(' ')}</div>
     <div class="mrow"><span class="muted">Pact:</span> ${pact} ${unasked ? '<button class="ghost" data-pact="">Rally them all</button>' : ''}</div>` : ''}

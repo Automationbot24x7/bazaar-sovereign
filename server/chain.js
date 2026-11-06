@@ -94,6 +94,7 @@ export function makeChain(live, table = 0) {
     return q.p;
   };
   const walletOf = slug => (live ? `${slug}${sfx}.${ROOT}` : `${slug}.bazaar.near`);
+  const magnateWallet = walletOf('magnate');
   const send = (from, to, amount) => acct(from).signAndSendTransaction({ receiverId: to, actions: [actions.transfer(amount)], waitUntil: 'INCLUDED' });
   const call = (signer, method, args, { deposit = 0n, gas = 100 } = {}) =>
     acct(signer).callFunctionRaw({ contractId: CONTRACT, methodName: method, args, deposit, gas: TGAS(gas) });
@@ -142,6 +143,8 @@ export function makeChain(live, table = 0) {
     pending: () => (live ? pendingTx() : 0),
     info: () => ({ mode: live ? 'testnet' : 'practice', table: live ? table + 1 : null, testnetAvailable, root: ROOT || null, contract: live ? CONTRACT : null, treasury: live ? TREASURY : null, explorer: EXPLORER, goldToNear: GOLD_TO_NEAR, pending: live ? pendingTx() : 0 }),
     explorerAccount: id => (live ? `${EXPLORER}/address/${id}` : null),
+    magnateWallet,
+    magnate: { name: 'Baltazar', wallet: magnateWallet, slug: 'magnate', player: false, tokenId: undefined },
 
     // this game's seat was given to someone else: stop signing, keep the feed
     goPractice(reason) {
@@ -184,6 +187,13 @@ export function makeChain(live, table = 0) {
         });
       }
       await rebalance(merchants);
+      // the Magnate's wallet holds the charters he seizes
+      enqueue(ROOT, 'magnate wallet', async () => {
+        if (!(await exists(magnateWallet))) {
+          const r = await root.createSubAccount({ accountOrPrefix: magnateWallet.split('.')[0], publicKey: pubKey, nearToTransfer: nearToYocto('0.05') });
+          push('wallet', 'A wallet is opened for the Golden Caravan Company, should it come to town.', hashOf(r));
+        }
+      });
       // a new season starts with empty warehouses
       enqueue(ROOT, 'reset goods', async () => {
         const r = await call(ROOT, 'sync_goods', { holdings: holdings(merchants) }, { gas: 200 });

@@ -84,6 +84,7 @@ class Game {
     this.chain.goPractice('Your seat at the live table was released after a few idle minutes. This game carries on as a practice table; start a new season to sit at a free live table.');
   }
   ownerOf(m) {
+    if (m.magnateHeld) return this.chain.magnateWallet;
     if (m.ownedBy) return this.world.merchants.find(x => x.id === m.ownedBy).wallet;
     return m.wallet;
   }
@@ -151,9 +152,9 @@ class Game {
         lesson(by, `Set rats on the player's warehouse on day ${w.day}; they lost ${rats.qty} ${rats.good}.`, 'Sent rats to your warehouse', 'bad');
       } else lesson(by, `My rats were caught by the player's night watch on day ${w.day}.`, 'Rats caught by your watch', 'warn');
     }
-    if (magnateBefore === 'dumping' && w.magnate?.stage !== 'dumping') {
+    if (magnateBefore && magnateBefore !== 'coming' && magnateBefore !== w.magnate?.stage) {
       const mg = w.magnate;
-      for (const m of this.npcs()) lesson(m, mg.stage === 'gone' ? `${MAGNATE.name} gave up and left the bazaar on day ${w.day} after losing ${Math.round(mg.loss)} coins.` : `${MAGNATE.name} took over ${mg.goods.join(' and ')} on day ${w.day} and raised prices.`, mg.stage === 'gone' ? `Saw ${MAGNATE.name} leave` : `${MAGNATE.name} owns ${mg.goods.join('+')}`, 'warn');
+      for (const m of this.npcs()) lesson(m, mg.stage === 'gone' ? `${MAGNATE.name} gave up and left the bazaar on day ${w.day}.` : `${MAGNATE.name} took a monopoly on ${mg.goods.join(' and ')} on day ${w.day}.`, mg.stage === 'gone' ? `Saw ${MAGNATE.name} leave` : `${MAGNATE.name} owns ${mg.goods.join('+')}`, 'warn');
     }
     if (w.lastStorm?.day === w.day) for (const m of this.npcs()) { const l = w.lastStorm.losses[m.id]; if (l > 0) lesson(m, `A sudden storm on day ${w.day} soaked ${l} coins of my stock; I had no awning.`, `Soaked by the storm −${l}`, 'bad'); }
     for (const d of backroomDeals(w, m => m.relation || 0)) {
@@ -167,7 +168,13 @@ class Game {
     this.npcs().forEach((m, i) => { if (fresh || (w.day + i) % 4 === 0) this.npcThink(m); });
 
     // vultures: a rich rival seizes a bankrupt charter if the player hasn't within 3 days
-    for (const t of w.merchants.filter(m => m.bankrupt && !m.ownedBy)) {
+    // charters the Magnate seized move to his wallet on-chain
+    for (const e of (w.magnateLog || []).splice(0)) {
+      const t = w.merchants.find(m => m.id === e.id);
+      this.chain.recordCharterSale(this.chain.magnate, t, e.price, `seized by ${MAGNATE.name}`);
+      for (const m of this.npcs()) lesson(m, `${MAGNATE.name} seized ${t.name}'s charter on day ${w.day}.`, `${MAGNATE.name} took ${t.name}`, 'warn');
+    }
+    for (const t of w.merchants.filter(m => m.bankrupt && !m.ownedBy && !m.magnateHeld)) {
       if (t.bankruptDay == null) for (const o of this.npcs()) lesson(o, `Saw ${t.name} go bankrupt on day ${w.day} while playing ${t.doctrine.stance}${t.doctrine.focus ? ' on ' + t.doctrine.focus : ''}.`, `Saw ${t.name} fall`, 'warn');
       t.bankruptDay ??= w.day;
       if (w.day - t.bankruptDay >= 3) {
@@ -185,7 +192,7 @@ class Game {
     const fallen = w.merchants.find(m => m.bankrupt && !m.ownedBy && !bankruptBefore.has(m.id) && !m.player);
     let d = null;
     if (fallen) {
-      d = { kind: 'bankrupt', title: `${fallen.name} is bankrupt!`, text: `Their charter can be seized for ${takeoverPrice(w, fallen)} coins (plus working capital to reopen it). If you don't, a rival will within three days.`, actions: [{ label: 'Seize the charter', act: 'takeover', target: fallen.id }, { label: 'Let it go', act: 'resume' }] };
+      d = { kind: 'bankrupt', title: `${fallen.name} is bankrupt!`, text: `Their charter can be seized for ${takeoverPrice(w, fallen)} coins (plus working capital to reopen it). ${['dumping', 'monopoly'].includes(w.magnate?.stage) ? `If you don't, ${MAGNATE.name} takes it tomorrow and grows stronger.` : "If you don't, a rival will within three days."}`, actions: [{ label: 'Seize the charter', act: 'takeover', target: fallen.id }, { label: 'Let it go', act: 'resume' }] };
     } else if (newOrder) {
       const g = G[newOrder.good];
       d = { kind: 'palace', title: 'The Palace wants goods', text: `${newOrder.qty} ${g.units} of ${g.name.toLowerCase()} by day ${newOrder.due}, paying ${newOrder.reward} coins (a ${Math.round(newOrder.reward * 0.15)}-coin advance when you claim it). Rivals will race you for it.`, actions: [{ label: 'Claim it', act: 'claim', id: newOrder.id }, { label: 'Leave it', act: 'resume' }] };
@@ -200,7 +207,14 @@ class Game {
       d = { kind: 'rumor', title: 'A rumor in the bazaar', text: `“${e.rumor}” ${hint}${e.demand ? ' Crowds will be bigger than one stall can serve.' : ''}`, actions: [...actions, ...hire, { label: 'Ignore it', act: 'resume' }] };
     }
     const mg = w.magnate;
-    if (!d && magnateBefore === 'coming' && mg?.stage === 'dumping') {
+    if (!d && magnateBefore !== 'gone' && mg?.stage === 'gone') {
+      const sale = mg.charters.map(id => w.merchants.find(m => m.id === id)).filter(t => t && t.bankrupt && !t.ownedBy);
+      d = { kind: 'palace', title: `${MAGNATE.name} leaves the bazaar!`, text: `${mg.why === 'bled' ? 'He has lost too much patience in this stubborn bazaar.' : 'The houses won their customers back and broke his monopoly.'} ${sale.length ? `His charters go to a fire sale: ${sale.map(t => `${t.name} (${takeoverPrice(w, t)} coins)`).join(', ')}.` : ''}`,
+        actions: [...sale.slice(0, 2).map(t => ({ label: `Seize ${t.name}'s charter`, act: 'takeover', target: t.id })), { label: 'Back to trading', act: 'resume' }] };
+    } else if (!d && magnateBefore === 'dumping' && mg?.stage === 'monopoly') {
+      d = { kind: 'bankrupt', title: `${MAGNATE.name} holds a monopoly`, text: `He now controls ${mg.goods.map(x => G[x].name.toLowerCase()).join(' and ')}: he buys up most of the caravans' supply and sets the price. If he still holds it on day ${SEASON_DAYS}, he owns the bazaar and nobody wins. Break it by winning back ${Math.round(MAGNATE.breakShare * 100)}% of those shoppers for ${MAGNATE.breakDays} days: corner the supply, sell below him, keep your goodwill.`,
+        actions: [{ label: `Corner ${G[mg.goods[0]].name.toLowerCase()}`, act: 'doctrine', doctrine: { stance: 'corner', focus: mg.goods[0], aggression: 0.85 } }, { label: 'Undercut on everything', act: 'doctrine', doctrine: { stance: 'undercut', focus: null, aggression: 0.7 } }, { label: 'Keep trading', act: 'resume' }] };
+    } else if (!d && magnateBefore === 'coming' && mg?.stage === 'dumping') {
       const best = [...mg.goods].sort((a, b) => w.prices[b] - w.prices[a])[0];
       d = { kind: 'magnate', title: `${MAGNATE.name} opens his stall`, text: `${MAGNATE.title} sells ${mg.goods.map(x => `${G[x].name.toLowerCase()} at ${magnatePrice(w, x)}`).join(' and ')} coins, below his own cost, to steal every customer. He stays only while it pays. Make it not pay: buy off his carts (up to ${MAGNATE.raidCap} a day, delivered overnight), rally the rivals into a pact, or trade the goods he ignores.`,
         actions: [{ label: 'Rally the rivals', act: 'pacts' }, { label: `Buy ${MAGNATE.raidCap} cheap ${G[best].name.toLowerCase()}`, act: 'raid', good: best }, { label: 'Ignore him for now', act: 'resume' }] };
@@ -280,10 +294,10 @@ class Game {
         id: m.id, name: m.name, art: m.art, color: m.color, player: !!m.player, gold: Math.round(m.gold), netWorth: Math.round(netWorth(w, m)),
         inventory: m.inventory, lastPnl: Math.round(m.lastPnl), doctrine: m.doctrine, bark: m.bark, thought: m.thought, brain: m.brain,
         modelLabel: MODEL_LABEL[m.model] || null, thinkMs: m.thinkMs || 0, thinking: this.thinking.has(m.id),
-        bankrupt: m.bankrupt, ownedBy: m.ownedBy || null, vassal: !!m.ownedBy, tribute: Math.round(m.tribute || 0), trading: trading(m), tokenId: m.tokenId, wallet: m.wallet, owner: m.wallet ? this.ownerOf(m) : null,
+        bankrupt: m.bankrupt, magnateHeld: !!m.magnateHeld, goodwill: m.goodwill ?? 0, ownedBy: m.ownedBy || null, vassal: !!m.ownedBy, tribute: Math.round(m.tribute || 0), trading: trading(m), tokenId: m.tokenId, wallet: m.wallet, owner: m.wallet ? this.ownerOf(m) : null,
         walletUrl: this.chain.explorerAccount(m.wallet), charters: chartersOwned(w, m), contractsWon: m.contractsWon || 0,
         netHistory: m.netHistory.slice(-60), lastAsk: m.lastAsk || {},
-        takeoverPrice: m.bankrupt && !m.ownedBy ? takeoverPrice(w, m) : null,
+        takeoverPrice: m.bankrupt && !m.ownedBy && !m.magnateHeld ? takeoverPrice(w, m) : null,
         helpers: m.helpers || 0, helperDays: m.helperDays || 0, awning: !!m.awning, capacity: capacity(m), servedToday: m.servedToday || 0,
         profile: m.profile || null, lessons: (m.lessons || []).slice(-5), chips: (m.chips || []).slice(-2), mood: m.player ? null : mood(m),
         buyoutHint: !m.player && trading(m) && !m.ownedBy ? buyoutValue(w, m) : null,
@@ -296,7 +310,8 @@ class Game {
       magnate: w.magnate ? {
         name: MAGNATE.name, title: MAGNATE.title, stage: w.magnate.stage, goods: w.magnate.goods || [], arriveDay: MAGNATE.arriveDay,
         prices: Object.fromEntries((w.magnate.goods || []).map(x => [x, magnatePrice(w, x)])),
-        loss: Math.round(w.magnate.loss || 0), patience: MAGNATE.patience, lastLoss: w.magnate.lastLoss || 0, left: w.magnate.left || null, why: w.magnate.why || null,
+        loss: Math.round(w.magnate.loss || 0), patience: MAGNATE.patience, share: w.magnate.share || 0, reach: w.magnate.reach || 1,
+        charters: (w.magnate.charters || []).map(id => w.merchants.find(m => m.id === id)?.name), breakShare: MAGNATE.breakShare, breakDays: MAGNATE.breakDays, back: w.magnate.back || 0, monopolyAt: MAGNATE.monopolyAt, lastLoss: w.magnate.lastLoss || 0, left: w.magnate.left || null, why: w.magnate.why || null,
         raidCap: MAGNATE.raidCap, raidLeft: MAGNATE.raidCap - (me.raidDay === w.day ? me.raided || 0 : 0), incoming: (me.incoming || []).reduce((t, d) => t + d.qty, 0),
         allies: (w.magnate.allies || []), asks: w.magnate.asks || {}, hits: (w.magnate.hits || []).slice(0, 5),
       } : null,
