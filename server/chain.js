@@ -184,6 +184,10 @@ export function makeChain(live, table = 0) {
         });
         await enqueue(ROOT, `charter ${m.tokenId}`, async () => {
           const existing = await view('nft_token', { token_id: m.tokenId }).catch(() => null);
+          const media = `${PUBLIC_URL}/art/${m.art || m.slug}.webp`;
+          if (existing && existing.metadata?.media !== media && !/localhost/.test(PUBLIC_URL)) {
+            await call(ROOT, 'set_media', { token_id: m.tokenId, media }, { gas: 30 }).catch(e => push('error', `charter art for ${m.name}: ${e.message?.slice(0, 80)}`));
+          }
           if (existing) {
             if (existing.owner_id !== ownerOf(m)) {
               const r = await call(existing.owner_id, 'nft_transfer', { receiver_id: ownerOf(m), token_id: m.tokenId, memo: 'New season: the charter returns to its merchant' }, { deposit: 1n, gas: 50 });

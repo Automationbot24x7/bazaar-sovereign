@@ -7,7 +7,7 @@
       "compiler": "rustc 1.95.0",
       "builder": "cargo-near cargo-near-build 0.11.5"
     },
-    "wasm_hash": "4hWquvd6FbFg4LMVGymtLEfoqu4j1r6rkoghKd1Usr3Y"
+    "wasm_hash": "DKBwbCoQmn5inoa5F6AmaSEcRVy8GNSyrD44kUGaHHFV"
   },
   "body": {
     "functions": [
@@ -928,6 +928,28 @@
             },
             {
               "name": "price",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "set_media",
+        "doc": " Vizier: point a charter's image at a new URL (the game moved host).",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "token_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "media",
               "type_schema": {
                 "type": "string"
               }

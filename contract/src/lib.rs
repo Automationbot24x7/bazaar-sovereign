@@ -198,6 +198,15 @@ impl Contract {
         require!(env::predecessor_account_id() == self.tokens.owner_id, "Only the Vizier (game oracle) can do this");
     }
 
+    /// Vizier: point a charter's image at a new URL (the game moved host).
+    pub fn set_media(&mut self, token_id: TokenId, media: String) {
+        self.assert_vizier();
+        let metas = self.tokens.token_metadata_by_id.as_mut().expect("No metadata");
+        let mut meta = metas.get(&token_id).expect("No such charter");
+        meta.media = Some(media);
+        metas.insert(&token_id, &meta);
+    }
+
     fn write_metadata(&mut self, token_id: &TokenId, c: &Charter) {
         let status = if c.bankrupt { "BANKRUPT" } else { "trading" };
         let meta = TokenMetadata {
@@ -573,6 +582,25 @@ mod tests {
         let mut b = VMContextBuilder::new();
         b.predecessor_account_id(pred).attached_deposit(NearToken::from_millinear(100));
         b
+    }
+
+    #[test]
+    fn vizier_can_move_charter_art() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.mint_charter("charter-vey".into(), accounts(2), "Vey".into(), accounts(2), "silk".into(), Some("http://localhost:3000/art/vey.webp".into()));
+        c.set_media("charter-vey".into(), "https://bazaar.example/art/vey.webp".into());
+        assert_eq!(c.nft_token("charter-vey".into()).unwrap().metadata.unwrap().media.unwrap(), "https://bazaar.example/art/vey.webp");
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the Vizier")]
+    fn only_vizier_moves_art() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.mint_charter("charter-vey".into(), accounts(2), "Vey".into(), accounts(2), "silk".into(), None);
+        testing_env!(ctx(accounts(3)).build());
+        c.set_media("charter-vey".into(), "https://evil.example/x.webp".into());
     }
 
     #[test]

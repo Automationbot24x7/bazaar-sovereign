@@ -1,6 +1,12 @@
 const $ = s => document.querySelector(s);
-const api = (path, body) => fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
-  .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+// the game id rides in a header too: inside an embedding iframe the cookie is third-party and may be blocked
+let gameId = (() => { try { return localStorage.getItem('bs-game') || ''; } catch { return ''; } })();
+const api = (path, body) => fetch(path, { method: body ? 'POST' : 'GET', headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(gameId ? { 'X-Game': gameId } : {}) }, body: body ? JSON.stringify(body) : undefined })
+  .then(async r => {
+    const id = r.headers.get('X-Game-Id');
+    if (id && id !== gameId) { gameId = id; try { localStorage.setItem('bs-game', id); } catch {} }
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+  });
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const STANCE_HINT = {
   steady: 'Fair markup on everything. Safe, slow, steady.',

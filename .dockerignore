@@ -1,0 +1,11 @@
+node_modules
+Credentials
+art-src
+contract/target
+contract/out
+.env
+.ai-spend.json
+test
+tools
+*.md
+.git

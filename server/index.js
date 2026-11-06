@@ -350,10 +350,25 @@ function sweep() {
 }
 setInterval(sweep, 30_000).unref();
 
+// ---------- per-visitor limits: every new game wakes four AI rivals, so bots must not mint games ----------
+const clientIp = req => String(req.headers['fly-client-ip'] || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+const buckets = new Map();
+function allow(req, kind, perHour) {
+  const k = `${kind}:${clientIp(req)}`, now = Date.now(), b = buckets.get(k) || { n: 0, since: now };
+  if (now - b.since > 3600_000) { b.n = 0; b.since = now; }
+  b.n++; buckets.set(k, b);
+  return b.n <= perHour;
+}
+setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.since > 3600_000) buckets.delete(k); }, 600_000).unref();
+const LIMITS = { game: Number(process.env.LIMIT_GAMES_PER_HOUR || 15), ai: Number(process.env.LIMIT_AI_PER_HOUR || 80), season: Number(process.env.LIMIT_SEASONS_PER_HOUR || 20) };
+const tooMany = what => Object.assign(new Error(`Too many ${what} from your connection; try again in a while`), { status: 429 });
+
 function gameFor(req, res) {
-  const sid = /(?:^|;\s*)bs=([a-f0-9]{24})/.exec(req.headers.cookie || '')?.[1];
+  const fromHeader = /^[a-f0-9]{24}$/.test(req.headers['x-game'] || '') ? req.headers['x-game'] : null;
+  const sid = fromHeader || /(?:^|;\s*)bs=([a-f0-9]{24})/.exec(req.headers.cookie || '')?.[1];
   let g = sid && games.get(sid);
   if (!g) {
+    if (!allow(req, 'game', LIMITS.game)) throw tooMany('new games');
     sweep();
     if (games.size >= MAX_GAMES) {
       dropGame([...games.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0]);
@@ -362,9 +377,11 @@ function gameFor(req, res) {
     const seat = freeSeat();
     g = new Game(id, seat >= 0 ? seat : null, Number(process.env.SEED) || undefined);
     games.set(id, g);
-    res.setHeader('Set-Cookie', `bs=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `bs=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${secure}`);
   }
   g.lastSeen = Date.now();
+  res.setHeader('X-Game-Id', g.id);
   return g;
 }
 
@@ -424,9 +441,15 @@ const body = req => new Promise(r => { let d = ''; req.on('data', c => { d += c;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.json': 'application/json' };
 const lastOrder = new Map();
 
+const AI_ROUTES = new Set(['/api/offer', '/api/order', '/api/pact']);
 http.createServer(async (req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://huggingface.co https://*.hf.space"); // only the host page may embed the game
   try {
+    if (AI_ROUTES.has(p) && req.method === 'POST' && !allow(req, 'ai', LIMITS.ai)) throw tooMany('requests to the rivals');
+    if (p === '/api/reset' && req.method === 'POST' && !allow(req, 'season', LIMITS.season)) throw tooMany('new seasons');
     if (p === '/healthz') return send(res, 200, { ok: true, aiSpendToday: spend.usd, games: games.size, liveTables: LIVE_TABLES, liveSeated: liveSeats.filter(Boolean).length, aiInflight });
     if (p.startsWith('/api/')) {
       const g = gameFor(req, res);
@@ -512,8 +535,8 @@ http.createServer(async (req, res) => {
     res.end(data);
   } catch (e) {
     if (!/not trading|no longer open|already holds|need|only|Give them|Choose|Name a price|doesn't have|costs|clerks|not selling|does not sell|not dumping|Guild|Nothing is owed|watch|plotting|pact|bankrupt house/i.test(e.message)) console.error(e);
-    send(res, 400, { error: e.message });
+    send(res, e.status || 400, { error: e.message });
   }
-}).listen(PORT, () => {
+}).listen(PORT, '0.0.0.0', () => {
   console.log(`Bazaar Sovereign → http://localhost:${PORT} | live tables: ${LIVE_TABLES ? `${LIVE_TABLES} on NEAR testnet` : 'off (practice only)'} | minds: ${aiOn() ? 'live AI' : 'heuristic'}`);
 });
