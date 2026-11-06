@@ -31,12 +31,37 @@ const cryPct = m => m.cry ? Math.round(30 * m.cry.score * Math.max(0, 1 - (S.day
 const cryBadge = m => { const p = cryPct(m); return p ? `<span class="cryb" title="Street cry: “${esc(m.cry.text)}” draws up to ${p}% more shoppers${m.cry.good ? ' for ' + esc(goodName(m.cry.good)) : ''}">📣 +${p}%</span>` : ''; };
 
 // ---------- render ----------
+// Cards are kept between renders and only their body is rewritten, so the moving portraits never restart.
+const PORTRAIT_MOODS = { player: ['idle', 'up', 'down'], teodora: ['idle', 'up', 'down'], kasim: ['idle', 'up', 'down'], vey: ['idle', 'up', 'down'], ozzo: ['idle', 'up', 'down'] };
+function stallPortrait(card, m) {
+  const pic = card.querySelector('.portrait'), v = pic.querySelector('video');
+  pic.style.backgroundImage = `url(/art/${m.art}.webp)`;
+  const moods = PORTRAIT_MOODS[m.art];
+  // a good day shows on their face, so does a bad one; ruined and vassal houses stay still
+  const mood = m.lastPnl > 15 ? 'up' : m.lastPnl < -25 ? 'down' : 'idle';   // small daily rent is not worth a frown
+  const want = !reduceMotion && moods && !m.bankrupt && !m.ownedBy && !m.magnateHeld && moods.includes(mood) ? `/video/portrait-${m.art}${mood === 'idle' ? '' : '-' + mood}.mp4` : '';
+  if (!want) { if (v.getAttribute('src')) { v.pause(); v.removeAttribute('src'); v.load(); } v.hidden = true; return; }
+  if (v.getAttribute('src') !== want) { v.onerror = () => { v.hidden = true; }; v.onplaying = () => { v.hidden = false; }; v.src = want; }
+  if (v.paused) v.play().catch(() => {});
+}
 function stalls() {
-  $('#stalls').innerHTML = S.merchants.map(m => {
+  const box = $('#stalls');
+  S.merchants.forEach((m, i) => {
     const pnl = m.lastPnl, owner = m.ownedBy ? merchant(m.ownedBy) : null;
     const tradable = !m.player && m.trading && !m.vassal && !S.over;
-    return `<article class="stall ${m.player ? 'me' : ''} ${m.bankrupt ? 'bankrupt' : ''} ${owner ? 'vassal' : ''} ${tradable ? 'clickable' : ''}" style="--c:${m.color}" data-id="${m.id}" ${tradable ? `role="button" tabindex="0" title="Trade with ${esc(m.name)}"` : ''}>
-      <div class="portrait" style="background-image:url(/art/${m.art}.webp)"></div>
+    let card = box.querySelector(`:scope > .stall[data-id="${m.id}"]`);
+    if (!card) {
+      card = document.createElement('article'); card.className = 'stall'; card.dataset.id = m.id;
+      card.innerHTML = '<div class="portrait"><video muted loop playsinline preload="none" aria-hidden="true" hidden></video></div><div class="stall-body"></div>';
+    }
+    if (box.children[i] !== card) box.insertBefore(card, box.children[i] || null);
+    card.classList.toggle('me', !!m.player); card.classList.toggle('bankrupt', !!m.bankrupt);
+    card.classList.toggle('vassal', !!owner); card.classList.toggle('clickable', tradable);
+    card.style.setProperty('--c', m.color);
+    if (tradable) { card.setAttribute('role', 'button'); card.tabIndex = 0; card.title = `Trade with ${m.name}`; }
+    else { card.removeAttribute('role'); card.removeAttribute('tabindex'); card.removeAttribute('title'); }
+    stallPortrait(card, m);
+    card.querySelector('.stall-body').innerHTML = `
       <div>
         <h3>${esc(m.name)}${m.charters > 1 ? ` <span class="crowns" title="Charters held">${'♛'.repeat(m.charters)}</span>` : ''}${!m.player && m.mood ? ` <span class="mood ${m.mood.key}" title="Attitude toward you">${m.mood.label}</span>` : ''}</h3>
         <div class="nw">${m.netWorth.toLocaleString()}<small> coins net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}" title="Profit or loss yesterday">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
@@ -50,10 +75,11 @@ function stalls() {
       ${m.trading ? `<div class="goodwill" title="Goodwill: shoppers stay loyal to stalls that trade fairly. Gouging, empty shelves and rats lose it."><span>♥ Goodwill</span><i><b style="width:${Math.round((m.goodwill / 0.8) * 100)}%"></b></i>${cryBadge(m)}</div>` : ''}
       ${owner ? `<div class="owned">♛ Vassal of ${owner.player ? 'your house' : esc(owner.name)} · pays ${owner.player ? 'you' : 'them'} 20% of its profit</div>` : ''}
       ${m.tribute ? `<div class="owned">Vassals have paid ${m.player ? 'you' : 'this house'} ${dh(m.tribute)}</div>` : ''}
-    </article>`;
-  }).join('');
+`;
+  });
+  for (const el of [...box.children]) if (!S.merchants.some(m => m.id === el.dataset.id)) el.remove();
   for (const m of S.merchants) {
-    if (m.bark && prevBarks[m.id] !== m.bark) document.querySelector(`.stall[data-id="${m.id}"]`)?.classList.add('flash');
+    if (m.bark && prevBarks[m.id] !== m.bark) { const c = document.querySelector(`.stall[data-id="${m.id}"]`); if (c) pulse(c, 'flash'); }
     prevBarks[m.id] = m.bark;
   }
 }
@@ -474,12 +500,14 @@ async function playScene(id) {
   resumeAfter = false;
   holdForScene();
   $('#scene').hidden = false; $('#scene').dataset.scene = id;
+  sceneBackdrop(id);
   syncMusic();
   const lines = SCENES.scenes[id];
   for (let i = 0; i < lines.length; i++) {
     if (token !== sceneToken) return; // skipped
     const line = lines[i], who = SCENES.cast[line.who], text = line.text.replace(/<[^>]+>\s*/g, '');
     $('#scenePortrait').style.backgroundImage = who.art ? `url(/art/${who.art}.webp)` : 'url(/art/ruin.webp)';
+    scenePortraitVideo(who.art);
     if ($('#sceneName').textContent !== who.name) pulse($('#scenePortrait'), 'fx-speak'); // a new speaker steps forward
     $('#sceneName').textContent = who.name;
     const p = $('#sceneLine'); p.textContent = '';
@@ -499,9 +527,28 @@ async function playScene(id) {
   }
   if (token === sceneToken) finishScene();
 }
+// moving paintings behind the dialogue and in the speaker's frame; the still shows until the video can play
+const CINE = { scenes: ['opening', 'rumor', 'arrival', 'monopoly', 'seized', 'leaves', 'wins', 'end'], portraits: ['teodora', 'kasim', 'vey', 'ozzo', 'magnate', 'crier'] };
+const playQuiet = v => { if (!reduceMotion) v.play().catch(() => {}); };
+function sceneBackdrop(id) {
+  const v = $('#sceneBg'), has = CINE.scenes.includes(id);
+  v.poster = has ? `/art/scenes/${id}.webp` : '/art/bazaar.webp';
+  $('#scene').style.setProperty('--still', `url(${v.poster})`);
+  if (!has) { v.removeAttribute('src'); v.load(); return; }
+  if (!v.src.endsWith(`/video/scene-${id}.mp4`)) v.src = `/video/scene-${id}.mp4`;
+  playQuiet(v);
+}
+function scenePortraitVideo(art) {
+  const v = $('#scenePortraitVid'), has = CINE.portraits.includes(art);
+  v.hidden = !has;
+  if (!has) { v.pause(); return; }
+  if (!v.src.endsWith(`/video/portrait-${art}.mp4`)) { v.poster = `/art/${art}.webp`; v.src = `/video/portrait-${art}.mp4`; }
+  playQuiet(v);
+}
 function finishScene() {
   scenePlaying = false;
   $('#scene').hidden = true;
+  $('#sceneBg').pause(); $('#scenePortraitVid').pause();
   if (sceneQueue.length && !skipScenes) return playScene(sceneQueue.shift());
   syncMusic();
   // carry on where we were, unless a decision is waiting for the player

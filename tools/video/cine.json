@@ -1,0 +1,285 @@
+{
+  "style": "Rich storybook illustration in gouache and ink, inspired by Persian and Mughal miniature painting but original, warm saffron, terracotta, indigo and teal palette, soft golden-hour light, fine dark ink outlines, subtle paper texture. Match the painting style of the reference bazaar image exactly. No text, no letters, no watermark, no border.",
+  "refs": {
+    "bazaar": "https://bazaar.reconscribe.com/art/bazaar.webp",
+    "magnate": "https://bazaar.reconscribe.com/art/magnate.webp",
+    "wagon": "https://bazaar.reconscribe.com/art/sprites/magnate-1.webp",
+    "teodora": "https://bazaar.reconscribe.com/art/teodora.webp",
+    "kasim": "https://bazaar.reconscribe.com/art/kasim.webp",
+    "vey": "https://bazaar.reconscribe.com/art/vey.webp",
+    "ozzo": "https://bazaar.reconscribe.com/art/ozzo.webp",
+    "camels": "https://bazaar.reconscribe.com/art/sprites/camels-1.webp",
+    "player": "https://bazaar.reconscribe.com/art/player.webp"
+  },
+  "stills": {
+    "rumor": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "wagon"
+      ],
+      "prompt": "Night in the same desert bazaar, seen from a quiet lantern-lit corner between two stalls. Two merchants lean together whispering. Far beyond the city gate, on the moonlit dunes, a long caravan of camels with glinting gold harnesses and black-and-gold wagons approaches."
+    },
+    "arrival": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "wagon",
+        "magnate"
+      ],
+      "prompt": "The same bazaar street at golden dusk. A grand procession of ornate black-and-gold wagons with golden canopies and crimson pennants, pulled by camels in gold harness and led by porters in black-and-gold livery, rolls into the street toward the viewer. Townsfolk and stall keepers step aside and stare."
+    },
+    "monopoly": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "wagon"
+      ],
+      "prompt": "The same bazaar street under a dark, bruised purple sky. Most stalls are shuttered with grey cloth. Long black-and-gold banners with a golden camel emblem hang over every awning. A thin queue of shoppers waits at a single gleaming black-and-gold wagon heaped with goods. Gloomy, oppressive mood."
+    },
+    "seized": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "wagon",
+        "teodora"
+      ],
+      "prompt": "Close view of one striped merchant stall. Two porters in black-and-gold livery hang a black-and-gold banner with a golden camel emblem over the stall. The elderly stall owner in a green shawl watches, saddened. A torn parchment charter with a broken wax seal lies on the ground."
+    },
+    "leaves": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "wagon"
+      ],
+      "prompt": "Dawn at the city gate of the desert town. The black-and-gold wagons with golden canopies roll out through the gate into the open desert, trailing dust. Behind them, merchants stand at their colorful stalls, cheering and waving."
+    },
+    "wins": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "wagon"
+      ],
+      "prompt": "Night. The same bazaar street lies dark and silent, every stall shuttered and its lanterns out. Only the black-and-gold wagons glow, hung with golden lanterns, and a huge black-and-gold banner with a golden camel emblem hangs across the road to the palace. Lonely, defeated mood."
+    },
+    "end": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar"
+      ],
+      "prompt": "Late evening in the same bazaar after the market closes. Merchants pack goods into chests and lower their awnings, a few lanterns still glow warmly, stars come out above the domed palace. Peaceful, content mood."
+    },
+    "festival": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar"
+      ],
+      "prompt": "Festival of Lanterns at night in the same bazaar. Hundreds of glowing paper sky lanterns rise over the striped awnings and the domed palace, crowds of townsfolk in festive clothes look up and point, strings of lanterns everywhere."
+    },
+    "storm": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar"
+      ],
+      "prompt": "A sudden storm lashes the same bazaar. Heavy slanting rain, dark grey-blue clouds, awnings straining in the wind, merchants hurrying to pull covers over spice pyramids and silk, puddles on the road, a flash of lightning over the palace."
+    },
+    "caravan": {
+      "ratio": "16:9",
+      "refs": [
+        "bazaar",
+        "camels"
+      ],
+      "prompt": "A great silk caravan enters the same bazaar street: a line of camels laden with rolled bolts of colorful silk, led by camel drivers in saffron robes, walking up the road between the stalls toward the viewer; merchants rush out to look."
+    },
+    "crier": {
+      "ratio": "1:1",
+      "refs": [
+        "kasim",
+        "teodora"
+      ],
+      "prompt": "Bust portrait in exactly the same style and framing as the reference portraits: a proud, booming town crier in a crimson coat with gold braid and a tall feathered turban, holding a brass hand bell, mouth open mid-announcement, centered on a plain warm parchment-toned background with a faint arch shape behind the head, game character card art."
+    }
+  },
+  "clips": {
+    "scene-opening": {
+      "model": "kling30",
+      "image": "ref:bazaar",
+      "loop": true,
+      "prompt": "Gentle ambient life in this painted bazaar: lanterns flicker and sway, townsfolk stroll and haggle, camels shift their weight, awnings ripple softly in a warm breeze. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-rumor": {
+      "model": "kling30",
+      "image": "still:rumor",
+      "loop": true,
+      "prompt": "Ambient motion at night: lantern flames flicker, the whispering merchants lean and gesture, the distant caravan creeps slowly over the dunes, stars twinkle. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-arrival": {
+      "model": "kling30",
+      "image": "still:arrival",
+      "loop": true,
+      "prompt": "Ambient motion: the golden pennants flutter, the camels toss their heads, the porters march in place, townsfolk turn and murmur, lantern light shimmers on the gold. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-monopoly": {
+      "model": "kling30",
+      "image": "still:monopoly",
+      "loop": true,
+      "prompt": "Ambient motion under a dark sky: the black-and-gold banners ripple heavily, the queue shuffles forward, dark clouds drift slowly. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-seized": {
+      "model": "kling30",
+      "image": "still:seized",
+      "loop": true,
+      "prompt": "Ambient motion: the porters tug the banner straight, it ripples in the breeze, the old trader shakes her head slowly, the torn charter flutters on the ground. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-leaves": {
+      "model": "kling30",
+      "image": "still:leaves",
+      "loop": true,
+      "prompt": "Ambient motion at dawn: dust drifts behind the departing wagons, pennants flutter, merchants wave and cheer, the sky slowly brightens. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-wins": {
+      "model": "kling30",
+      "image": "still:wins",
+      "loop": true,
+      "prompt": "Ambient motion at night: the golden lanterns on the wagons glow and flicker, the great banner sways slowly, a stray cloth flaps on a shuttered stall. The camera stays almost still. Keep the painted style exactly."
+    },
+    "scene-end": {
+      "model": "kling30",
+      "image": "still:end",
+      "loop": true,
+      "prompt": "Ambient motion in the evening: merchants fold cloth and close chests, lanterns flicker, stars twinkle above the palace. The camera stays almost still. Keep the painted style exactly."
+    },
+    "portrait-teodora": {
+      "model": "kling25",
+      "image": "ref:teodora",
+      "loop": true,
+      "prompt": "Subtle idle animation of this painted portrait: she blinks, smiles wryly, breathes, tilts her head slightly as if speaking. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-kasim": {
+      "model": "kling25",
+      "image": "ref:kasim",
+      "loop": true,
+      "prompt": "Subtle idle animation of this painted portrait: he grins, blinks, gestures with his hand as if shouting a bargain, shoulders bounce slightly. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-vey": {
+      "model": "kling25",
+      "image": "ref:vey",
+      "loop": true,
+      "prompt": "Subtle idle animation of this painted portrait: she raises an eyebrow, blinks slowly, gives a faint amused smile, the silk on her shoulder shimmers. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-ozzo": {
+      "model": "kling25",
+      "image": "ref:ozzo",
+      "loop": true,
+      "prompt": "Subtle idle animation of this painted portrait: he narrows his eyes, strokes his beard slowly, a knowing smile spreads, rings glint. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-magnate": {
+      "model": "kling25",
+      "image": "ref:magnate",
+      "loop": true,
+      "prompt": "Subtle idle animation of this painted portrait: he gives a cold polite smile, blinks slowly, taps the iron strongbox with one finger, the gold chain glints. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-crier": {
+      "model": "kling25",
+      "image": "still:crier",
+      "loop": true,
+      "prompt": "Subtle idle animation of this painted portrait: he lifts and rings the brass bell, mouth moving as if announcing, feathers on the turban sway. The camera does not move. Keep the painted style exactly."
+    },
+    "trailer-flyin": {
+      "model": "kling30",
+      "image": "ref:bazaar",
+      "prompt": "Cinematic camera glide: the camera flies slowly forward down the bazaar street between the stalls toward the domed palace, townsfolk and camels moving, lanterns glowing, warm dust in the golden light. Keep the painted style exactly."
+    },
+    "trailer-caravan": {
+      "model": "kling30",
+      "image": "still:caravan",
+      "prompt": "The silk caravan walks steadily up the street toward the camera, camels swaying, silk bolts bouncing, merchants pointing and calling out. Slow camera dolly backward. Keep the painted style exactly."
+    },
+    "trailer-festival": {
+      "model": "kling30",
+      "image": "still:festival",
+      "prompt": "Hundreds of glowing sky lanterns float up into the night sky, the crowd cheers and points, the camera tilts slowly upward following the lanterns toward the stars. Keep the painted style exactly."
+    },
+    "trailer-storm": {
+      "model": "kling30",
+      "image": "still:storm",
+      "prompt": "Heavy rain sweeps across the bazaar, awnings snap in the wind, merchants rush to cover their goods, lightning flashes over the palace. Handheld camera, slight shake. Keep the painted style exactly."
+    },
+    "trailer-arrival": {
+      "model": "kling30",
+      "image": "still:arrival",
+      "prompt": "The black-and-gold wagons roll forward toward the camera, camels stepping in rhythm, pennants streaming, townsfolk backing away. Slow camera push-in toward the lead wagon. Keep the painted style exactly."
+    },
+    "trailer-end": {
+      "model": "kling30",
+      "image": "still:end",
+      "prompt": "The camera rises slowly over the closing bazaar toward the starry sky above the palace, lanterns glowing below. Keep the painted style exactly."
+    },
+    "portrait-player": {
+      "model": "kling25",
+      "image": "ref:player",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: he glances down at his brass ledger, blinks, breathes, a small confident smile. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-player-up": {
+      "model": "kling25",
+      "image": "ref:player",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: he grins broadly and taps the brass ledger with satisfaction, eyes bright. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-player-down": {
+      "model": "kling25",
+      "image": "ref:player",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: he frowns at the brass ledger, bites his lip and rubs his brow. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-teodora-up": {
+      "model": "kling25",
+      "image": "ref:teodora",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: she gives a warm chuckle, nods knowingly and lifts her clay tea cup. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-teodora-down": {
+      "model": "kling25",
+      "image": "ref:teodora",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: she sighs, shakes her head slowly and sets down her tea cup. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-kasim-up": {
+      "model": "kling25",
+      "image": "ref:kasim",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: he throws his head back laughing and flips a coin in the air, catching it. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-kasim-down": {
+      "model": "kling25",
+      "image": "ref:kasim",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: he scowls, scratches his head under the red headscarf and grumbles. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-vey-up": {
+      "model": "kling25",
+      "image": "ref:vey",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: a smug, satisfied smile, she flicks the silk on her shoulder elegantly. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-vey-down": {
+      "model": "kling25",
+      "image": "ref:vey",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: her lips purse in cold disdain, she looks away and adjusts her pearls. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-ozzo-up": {
+      "model": "kling25",
+      "image": "ref:ozzo",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: a slow sly grin spreads, he steeples his ringed fingers. The camera does not move. Keep the painted style exactly."
+    },
+    "portrait-ozzo-down": {
+      "model": "kling25",
+      "image": "ref:ozzo",
+      "loop": true,
+      "prompt": "Subtle animation of this painted portrait: he narrows his eyes, mutters, and clenches his ringed hand. The camera does not move. Keep the painted style exactly."
+    }
+  }
+}

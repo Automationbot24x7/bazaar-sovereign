@@ -19,7 +19,7 @@
     [185, 410, 1.25], [683, 355, 1.1], [1057, 305, .7], [1100, 315, .7], [1076, 355, 1.2], [1214, 295, .55], [1460, 380, 1.2], [1535, 300, .8], [1590, 300, .7]];
   const HUMAN = { townsfolk: 212, camels: 161, magnate: 160 };   // a grown person's height in each sprite sheet's pixels
 
-  let bg = null, SP = null, W = 0, H = 0, dpr = 1, laneY = 0, onScreen = true, last = 0, t = 0;
+  let bg = null, loopVid = null, SP = null, W = 0, H = 0, dpr = 1, laneY = 0, onScreen = true, last = 0, t = 0;
   const walkers = [], motes = [], birds = [], drops = [], skyLanterns = [];
   let flash = 0, nextBolt = 0, nextSpawn = 0, nextWagon = 0, lastEvents = '', lastStage = '';
 
@@ -268,7 +268,9 @@
     const m = mood(), v = view();
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.drawImage(bg, v.ox, v.oy, IW * v.s, IH * v.s);
+    // the painting itself moves: an animated loop of the same picture, once it can play (the still until then)
+    const live = loopVid && loopVid.readyState >= 2 && !loopVid.paused;
+    ctx.drawImage(live ? loopVid : bg, v.ox, v.oy, IW * v.s, IH * v.s);
     drawBirds(v, dt, m);
     drawSkyLanterns(dt, m);
     drawLanterns(v, m);
@@ -277,7 +279,12 @@
     drawMotes(dt, m);
     drawWeather(dt, m);
   }
-  function loop(now) { if (onScreen && !document.hidden) frame(now); else last = 0; if (!reduce) requestAnimationFrame(loop); }
+  function loop(now) {
+    const show = onScreen && !document.hidden;
+    if (loopVid) { if (show && loopVid.paused && loopVid.readyState >= 2) loopVid.play().catch(() => {}); else if (!show && !loopVid.paused) loopVid.pause(); }
+    if (show) frame(now); else last = 0;
+    if (!reduce) requestAnimationFrame(loop);
+  }
 
   // a small handle for checking the street by hand (and for the demo capture): bazaarStreet.caravan(), .magnate()
   window.bazaarStreet = { walkers, skyLanterns, caravan: () => caravan(), magnate: () => magnateTrain(), get ready() { return !!SP; } };
@@ -292,6 +299,10 @@
     if (!bg) { cv.remove(); return; }
     stage.classList.add('alive');                   // the canvas now paints the backdrop
     if (reduce) { frame(performance.now()); return; }
+    loopVid = Object.assign(document.createElement('video'), { muted: true, loop: true, playsInline: true, preload: 'auto', src: '/video/scene-opening.mp4' });
+    loopVid.setAttribute('muted', ''); loopVid.setAttribute('playsinline', '');
+    loopVid.addEventListener('canplay', () => loopVid.play().catch(() => {}), { once: true });
+    loopVid.onerror = () => { loopVid = null; };
     requestAnimationFrame(loop);
     const index = await fetch('/art/sprites/index.json').then(r => r.json()).catch(() => null);
     if (!index) return;

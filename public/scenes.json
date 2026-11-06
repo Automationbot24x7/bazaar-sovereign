@@ -2,7 +2,7 @@
   "cast": {
     "crier": {
       "name": "Town Crier",
-      "art": null,
+      "art": "crier",
       "voice": "Charon",
       "style": "a booming town crier announcing to a crowded market, proud and theatrical"
     },

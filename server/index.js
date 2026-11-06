@@ -451,7 +451,7 @@ async function makeOffer(g, b) {
 // ---------- http ----------
 const send = (res, code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const body = req => new Promise(r => { let d = ''; req.on('data', c => { d += c; if (d.length > 1e4) req.destroy(); }); req.on('end', () => { try { r(d ? JSON.parse(d) : {}); } catch { r({}); } }); });
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.json': 'application/json', '.mp4': 'video/mp4' };
 const lastOrder = new Map();
 
 const AI_ROUTES = new Set(['/api/offer', '/api/order', '/api/pact', '/api/cry']);
@@ -555,7 +555,17 @@ http.createServer(async (req, res) => {
     const file = join(process.cwd(), 'public', p === '/' ? 'index.html' : p.replace(/\.\./g, ''));
     const data = await readFile(file).catch(() => null);
     if (!data) return send(res, 404, { error: 'not found' });
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': ['.webp', '.mp3'].includes(extname(file)) ? 'public, max-age=86400' : 'no-cache' });
+    const type = MIME[extname(file)] || 'application/octet-stream', cache = ['.webp', '.mp3', '.mp4'].includes(extname(file)) ? 'public, max-age=86400' : 'no-cache';
+    // video needs byte ranges (Safari will not play an mp4 without them)
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (range && extname(file) === '.mp4') {
+      const size = data.length, start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2] || 0));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      if (start >= size || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+      res.writeHead(206, { 'Content-Type': type, 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+      return res.end(data.subarray(start, end + 1));
+    }
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache, ...(extname(file) === '.mp4' ? { 'Accept-Ranges': 'bytes' } : {}) });
     res.end(data);
   } catch (e) {
     if (!/not trading|no longer open|already holds|need|only|Give them|Choose|Name a price|doesn't have|costs|clerks|not selling|does not sell|not dumping|Guild|Nothing is owed|watch|plotting|pact|bankrupt house/i.test(e.message)) console.error(e);

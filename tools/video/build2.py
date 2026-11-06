@@ -29,6 +29,7 @@ frames = [(winpath(f['f']), f['t']) for f in json.load(open(f'{CAP}/frames.json'
 # shots, in CSS pixels of the 1920x1080 page (stills are 2x): pan from box A to box B, both 16:9
 STILL = lambda name, w, a, b: ('still', f'{CAP}/stills/{name}.png', w, a, b)
 CLIP = lambda t0, w, a: ('clip', t0, w, a)
+CINE = lambda name: ('cine', f'art-src/cine/clips/{name}.mp4')   # animated paintings (tools/video/gen-cine.mjs)
 # the living street: motion clips where the season gave us one, stills where it didn't
 BOARD = (160, 60)
 # day-stamped names change from season to season: take the first one with the prefix
@@ -38,17 +39,17 @@ EVENT = next((m for m in ('event-caravan', 'event-festival', 'event-storm', 'eve
 s3_extra = [CLIP(EVENT, 1600, BOARD)] if EVENT else []
 wagon = [CLIP('magnate-wagon', 1600, BOARD)] if 'magnate-wagon' in marks else []
 SEGMENTS = [
-    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CLIP('board-idle', 1600, BOARD)]),
+    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CINE('trailer-flyin'), CLIP('board-idle', 1600, BOARD)]),
     ('s2', 'A charter NFT that does something', [STILL('00-board-day0', 1152, (0, 300), (768, 300)), ('nearblocks',)]),
     ('s3', 'Rivals that shout, scheme and hold grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1600, BOARD), CLIP(mk('decision-palace'), 1600, (160, 40))]),
     ('s4', 'Atomic deals through escrow', [STILL('haggle-reply', 960, (470, 262), (490, 282)), STILL('haggle-deal', 960, (480, 266), (480, 280))]),
-    ('s5', 'Day 6: the Magnate arrives', [STILL('scene-arrival', 1280, (320, 290), (320, 330)), *wagon, STILL(st('decision-magnate'), 1440, (0, 100), (240, 140))]),
-    ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1600, (0, 40))]),
-    ('s7', 'Every move is on-chain', [STILL('scene-leaves', 1280, (320, 290), (320, 330)), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
-    ('s8', 'Play free: bazaar.reconscribe.com', [STILL('end-screen', 960, (480, 245), (480, 262)), ('end',)]),
+    ('s5', 'Day 6: the Magnate arrives', [CINE('trailer-arrival'), *wagon, STILL(st('decision-magnate'), 1440, (0, 100), (240, 140))]),
+    ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1600, (0, 40)), CINE('scene-wins')]),
+    ('s7', 'Every move is on-chain', [CINE('scene-leaves'), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
+    ('s8', 'Play free: bazaar.reconscribe.com', [CINE('trailer-festival'), STILL('end-screen', 960, (480, 245), (480, 262)), ('end',)]),
 ]
 # a shot whose still or mark is missing from this capture is dropped rather than failing the build
-SEGMENTS = [(sid, cap, [sh for sh in shots if (sh[0] != 'still' or os.path.exists(sh[1])) and (sh[0] != 'clip' or sh[1] in marks)]) for sid, cap, shots in SEGMENTS]
+SEGMENTS = [(sid, cap, [sh for sh in shots if (sh[0] not in ('still', 'cine') or os.path.exists(sh[1])) and (sh[0] != 'clip' or sh[1] in marks)]) for sid, cap, shots in SEGMENTS]
 
 BAND = "drawbox=y=ih-130:w=iw:h=130:color=0x120b07@0.88:t=fill"
 def caption(cap):
@@ -74,6 +75,12 @@ def motion_clip(out, secs, t0, w, a, cap):
     vf = f"fps={FPS},crop={w}:{h}:{a[0]}:{a[1]},scale=1920:1080:flags=lanczos,{caption(cap)},format=yuv420p"
     run('-f', 'concat', '-safe', '0', '-i', lst, '-vf', vf, '-t', f'{secs}', '-r', str(FPS), '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', out)
 
+def cine_clip(out, secs, src, cap):
+    # a 5 s painting clip stretched gently (slow motion) to fill its slot
+    k = max(1.0, secs / dur(src))
+    vf = f"setpts={k:.4f}*PTS,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps={FPS},{caption(cap)},format=yuv420p"
+    run('-i', src, '-an', '-vf', vf, '-t', f'{secs}', '-r', str(FPS), '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', out)
+
 def intro_clip(out, secs):
     vf = f"fps={FPS},tpad=stop_mode=clone:stop_duration=10,format=yuv420p"
     run('-framerate', str(FPS), '-i', f'{V}/intro/intro_%04d.png', '-vf', vf, '-t', f'{secs}', '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', out)
@@ -90,7 +97,12 @@ def end_clip(out, secs):
           f"drawtext=fontfile={SANS}:text='Every merchant is an NFT that owns its own NEAR wallet':fontsize=40:fontcolor=0xf3e6cc:x=(w-tw)/2:y=480,"
           f"drawtext=fontfile={SANS}:text='Play free\\: bazaar.reconscribe.com':fontsize=56:fontcolor=white:x=(w-tw)/2:y=600,"
           f"drawtext=fontfile={SANS}:text='Built on NEAR testnet · NEAR Hackathon 2026':fontsize=32:fontcolor=0xcbb894:x=(w-tw)/2:y=700,format=yuv420p")
-    run('-framerate', str(FPS), '-loop', '1', '-t', f'{secs}', '-i', 'public/art/bazaar.webp', '-vf', vf, '-frames:v', str(round(secs * FPS)), '-c:v', 'libx264', '-crf', '17', out)
+    bg = 'art-src/cine/clips/trailer-end.mp4'   # the closing bazaar, camera rising to the stars, under the title
+    if os.path.exists(bg):
+        k = max(1.0, secs / dur(bg))
+        run('-i', bg, '-an', '-vf', f'setpts={k:.4f}*PTS,fps={FPS},' + vf, '-frames:v', str(round(secs * FPS)), '-c:v', 'libx264', '-crf', '17', out)
+    else:
+        run('-framerate', str(FPS), '-loop', '1', '-t', f'{secs}', '-i', 'public/art/bazaar.webp', '-vf', vf, '-frames:v', str(round(secs * FPS)), '-c:v', 'libx264', '-crf', '17', out)
 
 # lay out the timeline: each segment lasts its narration + a breath; shots split it evenly
 starts, clips, vo_parts, t = [], [], [], 0.0
@@ -116,6 +128,7 @@ for i, ((s, length, cap), st) in enumerate(zip(clips, starts)):
     if kind == 'intro': intro_clip(out, secs)
     elif kind == 'still': still_clip(out, secs, s[1], s[2], s[3], s[4], cap)
     elif kind == 'clip': motion_clip(out, secs, marks[s[1]], s[2], s[3], cap)
+    elif kind == 'cine': cine_clip(out, secs, s[1], cap)
     elif kind == 'nearblocks': nearblocks_clip(out, secs, cap)
     elif kind == 'end': end_clip(out, secs)
     files.append(out); print(f'{out} {kind} {secs:.2f}s at {st:.2f}s')
