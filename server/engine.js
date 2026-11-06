@@ -84,24 +84,31 @@ function palace(w) {
     const candidates = c.takenBy ? w.merchants.filter(m => m.id === c.takenBy) : w.merchants.filter(trading).sort((a, b) => b.inventory[c.good] - a.inventory[c.good]);
     const m = candidates.find(m => trading(m) && m.inventory[c.good] >= c.qty);
     if (m) {
-      m.inventory[c.good] -= c.qty; m.gold += c.reward; m.contractsWon = (m.contractsWon || 0) + 1;
+      m.inventory[c.good] -= c.qty; m.gold += c.reward - (c.takenBy === m.id ? c.advance || 0 : 0); m.contractsWon = (m.contractsWon || 0) + 1;
       c.status = 'delivered'; c.deliveredBy = m.id;
       log(w, `${m.name} delivered ${c.qty} ${G[c.good].name} to the Palace and was paid ${c.reward} gold!`, 'palace');
       if (!m.player) m.bark = 'The Palace pays in gold, and I deliver in full.';
+    } else if (w.day > c.due && c.takenBy && trading(w.merchants.find(x => x.id === c.takenBy)) && w.merchants.find(x => x.id === c.takenBy).inventory[c.good] >= Math.ceil(c.qty / 2)) {
+      // partial delivery: at least half the order earns a pro-rated reward (minus the advance)
+      const t = w.merchants.find(x => x.id === c.takenBy), q = t.inventory[c.good], pay = Math.round((c.reward * q) / c.qty * 0.7);
+      t.inventory[c.good] -= q; t.gold += pay - (c.advance || 0); t.contractsWon = (t.contractsWon || 0) + 1;
+      c.status = 'delivered'; c.deliveredBy = t.id; c.partial = q;
+      log(w, `${t.name} delivered ${q} of ${c.qty} ${G[c.good].name} late and short; the Palace paid ${pay} gold.`, 'palace');
     } else if (w.day > c.due) {
       c.status = 'failed';
       if (c.takenBy) {
-        const t = w.merchants.find(x => x.id === c.takenBy), fine = Math.round(c.reward * 0.25);
-        t.gold -= fine;
-        log(w, `${t.name} failed the Palace order and was fined ${fine} gold.`, 'bankrupt');
+        const t = w.merchants.find(x => x.id === c.takenBy), fine = Math.min(60, Math.round(c.reward * 0.06));
+        t.gold -= (c.advance || 0) + fine;
+        log(w, `${t.name} failed the Palace order: the ${c.advance || 0}g advance is clawed back and a ${fine}g fine is due.`, 'bankrupt');
       } else log(w, `The Palace order for ${G[c.good].name} went unfilled.`, 'info');
     }
   }
   // a new order roughly every 6 days (first on day 3), at most one open at a time
   if (!w.over && !w.contracts.some(c => c.status === 'open') && (w.day === 3 || (w.day > 3 && w.rand() < 0.18))) {
     const g = GOODS[Math.floor(w.rand() * GOODS.length)];
-    const qty = Math.round(g.supply * (1 + w.rand() * 0.6));
-    const c = { id: `PO-${w.day}`, good: g.id, qty, reward: Math.round(qty * g.base * (1.9 + w.rand() * 0.6)), due: w.day + 5, takenBy: null, status: 'open', posted: w.day };
+    // sized so a healthy house can actually fund it (about 450 gold of stock at wholesale)
+    const qty = Math.max(6, Math.round(Math.min(g.supply * (1 + w.rand() * 0.6), 450 / (g.base * 0.65))));
+    const c = { id: `PO-${w.day}`, good: g.id, qty, reward: Math.round(qty * g.base * (1.6 + w.rand() * 0.4)), due: w.day + 5, takenBy: null, status: 'open', posted: w.day };
     w.contracts.unshift(c);
     log(w, `The Palace wants ${qty} ${g.name} by day ${c.due}, paying ${c.reward} gold.`, 'palace');
   }
@@ -113,7 +120,9 @@ export function acceptContract(w, m, id) {
   if (!c || c.status !== 'open') throw new Error('That order is no longer open');
   if (c.takenBy) throw new Error('Someone already holds that order');
   c.takenBy = m.id;
-  log(w, `${m.name} accepted the Palace order for ${c.qty} ${G[c.good].name}. Stock is now reserved.`, 'palace');
+  c.advance = Math.round(c.reward * 0.15); // the Palace pays an advance so the taker can buy stock
+  m.gold += c.advance;
+  log(w, `${m.name} claimed the Palace order for ${c.qty} ${G[c.good].name} and received a ${c.advance}g advance.`, 'palace');
   return c;
 }
 
@@ -127,8 +136,9 @@ function orders(w, m, g, rivals) {
 
   switch (d.stance) {
     case 'undercut':
-      buyQty = Math.round(g.supply * 0.3);
-      ask = Number.isFinite(rivalMin) ? Math.max(floor, rivalMin - 0.5) : ask;
+      // a price war: beat the cheapest rival by a real margin, down to barely above cost
+      buyQty = Math.round(g.supply * 0.25);
+      ask = Number.isFinite(rivalMin) ? Math.max(unitCost * 1.14, rivalMin * (0.93 - 0.05 * a)) : Math.max(unitCost, wholesale) * 1.2; // floor covers the 8% tax
       break;
     case 'corner':
       if (focus) {
@@ -193,33 +203,41 @@ export function step(w) {
       m.inventory[g.id] += q; m.gold -= price * q; pnl[m.id] -= price * q;
       trades.push({ day: w.day, merchant: m.id, side: 'buy', good: g.id, qty: q, price });
     }
-    // ---- retail: linear demand curve, cheapest stall sells first ----
-    const choke = g.base * 3.2, A = g.demand * dem[g.id];
-    const Q = p => Math.max(0, Math.round(A * (1 - p / choke)));
-    let served = 0, sold = 0, revenue = 0;
+    // ---- retail: market-share model ----
+    // Each stall wins a share of shoppers that falls smoothly as its price rises relative
+    // to the market (elasticity E); premium stalls get a quality bonus. Total demand follows
+    // a linear curve in the share-weighted price. Shoppers a stall can't serve spill over.
+    const choke = g.base * 3.2, A = g.demand * dem[g.id], E = 3.5;
+    const Q = p => Math.max(0, A * (1 - p / choke));
+    let sold = 0, revenue = 0;
     const sell = (b, q) => {
-      if (q <= 0) return;
+      q = Math.floor(q);
+      if (q <= 0) return 0;
       sold += q; revenue += q * b.ask;
       const net = q * b.ask * (1 - BAZAAR_TAX);
       b.m.inventory[g.id] -= q; b.m.gold += net; pnl[b.m.id] += net;
       trades.push({ day: w.day, merchant: b.m.id, side: 'sell', good: g.id, qty: q, price: b.ask });
+      return q;
     };
     const avail = b => Math.max(0, b.m.inventory[g.id] - reserved(w, b.m, g.id));
-    const sellers = book.filter(b => avail(b) > 0);
     for (const b of book) b.m.lastAsk = { ...(b.m.lastAsk || {}), [g.id]: b.ask };
-    // loyal regulars: a slice of shoppers sticks to each stall if the price isn't absurd
-    for (const b of sellers) {
-      const loyal = Math.round(A * (b.m.doctrine.stance === 'premium' ? 0.14 : 0.07) * Math.max(0, 1 - b.ask / (choke * 0.9)) * 1.6);
-      sell(b, Math.min(avail(b), loyal));
-    }
-    // everyone else buys from the cheapest stall that still has stock
-    for (const b of sellers.sort((x, y) => x.ask - y.ask)) {
-      const room = Q(b.ask) - served;
-      const q = Math.max(0, Math.min(avail(b), room));
-      served += q; sell(b, q);
+    let sellers = book.filter(b => avail(b) > 0 && b.ask < choke);
+    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.8 : 1);
+    if (sellers.length) {
+      const W0 = sellers.reduce((t, b) => t + weight(b), 0);
+      const pAvg = sellers.reduce((t, b) => t + b.ask * weight(b), 0) / W0;
+      let left = Q(pAvg) * (0.9 + w.rand() * 0.2);
+      for (let pass = 0; pass < 3 && left >= 1 && sellers.length; pass++) {
+        const W = sellers.reduce((t, b) => t + weight(b), 0);
+        let served = 0;
+        for (const b of sellers) served += sell(b, Math.min(avail(b), (left * weight(b)) / W + (pass ? 0 : w.rand())));
+        left -= served;
+        sellers = sellers.filter(b => avail(b) > 0);
+        if (!served) break;
+      }
     }
     // market price = volume-weighted ask, or drifts up when nobody sells (scarcity)
-    const unmet = Q(0) > 0 && sold === 0;
+    const unmet = A > 0 && sold === 0;
     const px = sold ? revenue / sold : w.prices[g.id] * (unmet ? 1.12 : 1);
     w.prices[g.id] = +(w.prices[g.id] * 0.4 + px * 0.6).toFixed(2);
     w.history[g.id].push(w.prices[g.id]);
@@ -236,7 +254,9 @@ export function step(w) {
     let cost = RENT * rent;
     for (const g of GOODS) {
       cost += m.inventory[g.id] * g.storage;
-      if (g.spoil && m.inventory[g.id]) m.inventory[g.id] = Math.floor(m.inventory[g.id] * (1 - g.spoil));
+      // stock reserved for the Palace is sealed in the Palace storeroom and does not spoil
+      const keep = Math.min(m.inventory[g.id], reserved(w, m, g.id));
+      if (g.spoil && m.inventory[g.id] > keep) m.inventory[g.id] = keep + Math.floor((m.inventory[g.id] - keep) * (1 - g.spoil));
     }
     m.gold -= cost; pnl[m.id] -= cost;
     // fire sale: dump stock to pawnbrokers at 45% of base before declaring bankruptcy

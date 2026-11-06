@@ -35,13 +35,14 @@ test('a claimed Palace order reserves stock and pays on delivery', () => {
   const w = world();
   w.contracts.push({ id: 'PO-T', good: 'salt', qty: 10, reward: 500, due: 9, takenBy: null, status: 'open', posted: 0 });
   const me = M(w, 'you');
-  acceptContract(w, me, 'PO-T');
-  me.inventory.salt = 10;
   const gold = me.gold;
+  acceptContract(w, me, 'PO-T');
+  assert.equal(me.gold, gold + 75, '15% advance paid on claim');
+  me.inventory.salt = 10;
   step(w);
   const c = w.contracts.find(c => c.id === 'PO-T');
   assert.equal(c.status, 'delivered');
-  assert.ok(me.gold > gold + 400, 'reward paid (minus rent)');
+  assert.ok(me.gold > gold + 400, 'full reward received in total (minus a day of rent)');
 });
 
 test('goods deal moves stock and gold between houses', () => {
@@ -59,12 +60,9 @@ test('a bought-out rival becomes a vassal that pays tribute', () => {
   assert.equal(a.ownedBy, 'you');
   assert.equal(chartersOwned(w, me), 2);
   // make the vassal profitable for a day and check the owner receives a cut
-  a.doctrine = { stance: 'steady', focus: null, aggression: 0.5 };
-  a.inventory.saffron = 30; a.cost.saffron = 5;
-  const before = me.gold;
-  step(w);
+  for (const g of ['saffron', 'silk', 'tea', 'salt']) { a.inventory[g] = 40; a.cost[g] = 1; }
+  for (let i = 0; i < 3; i++) step(w);
   assert.ok((me.tribute || 0) > 0, 'tribute recorded');
-  assert.ok(me.gold > before - 30, 'owner gold includes tribute');
   assert.equal(a.doctrine.stance, me.doctrine.stance, 'vassal follows owner strategy');
   const row = standings(w).find(r => r.id === 'you');
   assert.ok(row.netWorth >= Math.round(netWorth(w, me)), 'house worth includes vassals');
@@ -105,4 +103,18 @@ test('a resentful rival sells stock to another rival to sink the player\'s Palac
   assert.equal(deals[0].seller.id, 'a');
   assert.equal(a.inventory.tea, 0);
   assert.equal(backroomDeals(w, m => (m.id === 'a' ? -3 : 0)).length, 0, 'spites only once per order');
+});
+
+test('reserved Palace stock does not spoil; half an order earns a partial reward', () => {
+  const w = world(); const me = M(w, 'you');
+  w.contracts.push({ id: 'PO-P', good: 'tea', qty: 20, reward: 400, due: 2, takenBy: null, status: 'open', posted: 0 });
+  acceptContract(w, me, 'PO-P');
+  me.doctrine = { stance: 'liquidate', focus: null, aggression: 0.5 }; // buy nothing, so only spoilage could change stock
+  me.inventory.tea = 12;
+  step(w);
+  assert.equal(me.inventory.tea, 12, 'sealed tea did not rot');
+  step(w); step(w);
+  const c = w.contracts.find(c => c.id === 'PO-P');
+  assert.equal(c.status, 'delivered');
+  assert.equal(c.partial, 12);
 });

@@ -177,7 +177,8 @@ export async function think(w, m) {
       return { ...clean(d), bark: String(d.bark || '').slice(0, 120) || m.bark, thought: String(d.thought || '').slice(0, 220), claim: !!d.claim_palace_order, engine: 'claude', model, ms, cached: usage?.cache_read_input_tokens || 0 };
     } catch (e) { console.warn(`Claude unavailable for ${m.name} (${model}), using fallback: ${e.message.slice(0, 80)}`); }
   }
-  return { ...heuristic(w, m), engine: 'heuristic', model: null, ms: 0 };
+  const h = heuristic(w, m);
+  return { ...h, claim: !!h.claim_palace_order, engine: 'heuristic', model: null, ms: 0 };
 }
 
 // ---------- Player's natural-language orders -> doctrine ----------
@@ -199,6 +200,14 @@ export async function interpretOrder(w, me, order) {
 // ---------- fallback brain ----------
 function heuristic(w, m) {
   const t = m.persona.toLowerCase();
+  // race for an open Palace order that suits this merchant and that it can fund
+  const po = w.contracts?.find(c => c.status === 'open' && !c.takenBy);
+  if (po && m.gold > 120) {
+    const g = GOODS.find(x => x.id === po.good);
+    const fits = (/tea|salt/.test(t) && /tea|salt/.test(po.good)) || (/silk/.test(t) && po.good === 'silk') || /schem|greedy|bold/.test(t) || /cheap|undercut/.test(t);
+    const affordable = m.gold + po.reward * 0.15 > po.qty * g.base * 0.7;
+    if (fits && affordable && w.rand() < 0.5) return { stance: 'corner', focus: po.good, aggression: 0.75, claim_palace_order: true, bark: `The Palace order is mine. Every ${g.name.toLowerCase()} in town, to me!`, thought: 'Palace order fits my trade.' };
+  }
   if (m.gold < 40) return { stance: 'liquidate', focus: null, aggression: 0.3, bark: 'Everything must go — today only!', thought: 'Low on gold.' };
   if (w.pending?.supply) {
     const [good, mult] = Object.entries(w.pending.supply)[0];
