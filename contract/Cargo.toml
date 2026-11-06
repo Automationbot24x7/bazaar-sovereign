@@ -1,0 +1,28 @@
+[package]
+name = "bazaar-charters"
+description = "Bazaar Sovereign merchant charters: NEP-171 NFTs whose metadata tracks a living merchant business (wallet, net worth, stance) and that change hands on takeover."
+version = "1.0.0"
+edition = "2021"
+repository = "https://github.com/uncrop/bazaar-sovereign"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "5.30.1"
+near-contract-standards = "5.30.1"
+
+[dev-dependencies]
+near-sdk = { version = "5.30.1", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ['cfg(near)']
