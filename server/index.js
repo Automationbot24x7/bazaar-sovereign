@@ -16,7 +16,7 @@ const SETTLE_EVERY = 5;
 const MAX_GAMES = Number(process.env.MAX_GAMES || 150);
 const IDLE_PAUSE_MS = 45_000;          // a game pauses when its tab stops polling
 const GAME_TTL_MS = 30 * 60_000;       // and is forgotten after 30 idle minutes
-const LIVE_LEASE_MS = Number(process.env.LIVE_LEASE_SEC || 300) * 1000; // a live testnet seat frees up after 5 idle minutes
+const LIVE_LEASE_MS = Number(process.env.LIVE_LEASE_SEC || 180) * 1000; // a live testnet seat frees up after 3 idle minutes
 const LIVE_TABLES = testnetAvailable ? Math.max(1, Number(process.env.LIVE_TABLES || 3)) : 0;
 const AI_MAX_INFLIGHT = Number(process.env.AI_MAX_INFLIGHT || 10);
 
@@ -231,8 +231,9 @@ class Game {
         actions: [{ label: `Corner ${G[mg.goods[0]].name.toLowerCase()}`, act: 'doctrine', doctrine: { stance: 'corner', focus: mg.goods[0], aggression: 0.85 } }, { label: 'Undercut on everything', act: 'doctrine', doctrine: { stance: 'undercut', focus: null, aggression: 0.7 } }, { label: 'Keep trading', act: 'resume' }] };
     } else if (magnateBefore === 'coming' && mg?.stage === 'dumping') {
       const best = [...mg.goods].sort((a, b) => w.prices[b] - w.prices[a])[0];
+      const canBuy = Math.max(0, Math.min(MAGNATE.raidCap, Math.floor((me.gold - 5) / (G[best].base * MAGNATE.dumpPrice))));
       d = { kind: 'magnate', title: `${MAGNATE.name} opens his stall`, text: `${MAGNATE.title} sells ${mg.goods.map(x => `${G[x].name.toLowerCase()} at ${magnatePrice(w, x)}`).join(' and ')} coins, below his own cost, to steal every customer. He stays only while it pays. Make it not pay: buy off his carts (up to ${MAGNATE.raidCap} a day, delivered overnight), rally the rivals into a pact, or trade the goods he ignores.`,
-        actions: [{ label: 'Rally the rivals', act: 'pacts' }, { label: `Buy ${MAGNATE.raidCap} cheap ${G[best].name.toLowerCase()}`, act: 'raid', good: best }, { label: 'Ignore him for now', act: 'resume' }] };
+        actions: [{ label: 'Rally the rivals', act: 'pacts' }, ...(canBuy > 0 ? [{ label: `Buy ${canBuy} cheap ${G[best].name.toLowerCase()} (${Math.ceil(canBuy * G[best].base * MAGNATE.dumpPrice)} coins)`, act: 'raid', good: best, qty: canBuy }] : []), { label: 'Ignore him for now', act: 'resume' }] };
     }
     if (d) found.unshift(d);   // the Magnate's moves come first
     d = null;
@@ -517,7 +518,7 @@ http.createServer(async (req, res) => {
             if (a.act === 'hire') hireHelpers(w, me, a.n, a.days);
             if (a.act === 'awning') buyAwning(w, me);
             if (a.act === 'watch') hireWatch(w, me);
-            if (a.act === 'raid') raidMagnate(w, me, a.good, MAGNATE.raidCap);
+            if (a.act === 'raid') raidMagnate(w, me, a.good, a.qty || MAGNATE.raidCap);
             if (a.act === 'pacts') { const replies = await g.askPact(null, false); g.play(); return send(res, 200, { ...g.view(), pactReplies: replies }); }
             if (a.act === 'deal') { g.decision = null; return send(res, 200, { ...g.view(), openDeal: a.target }); }
             if (a.act === 'claim') { acceptContract(w, me, a.id); me.doctrine = { stance: 'corner', focus: w.contracts.find(c => c.id === a.id).good, aggression: Math.max(0.7, me.doctrine.aggression) }; }

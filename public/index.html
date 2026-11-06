@@ -55,9 +55,14 @@
     <section class="panel house">
       <h2><span id="houseTitle">Your House</span> <button type="button" class="ghost rename" id="rename" title="Rename your house">✎</button> <small id="houseCharter"></small></h2>
       <form id="orderForm" class="order">
-        <input id="order" autocomplete="off" maxlength="300" placeholder="Give your factor an order… e.g. “Drought is coming — corner the saffron”" />
+        <input id="order" autocomplete="off" maxlength="300" placeholder="Give your factor an order in plain words…" />
         <button class="primary" id="orderBtn">Send</button>
       </form>
+      <div class="chips-row" id="orderChips"><span class="muted">Try:</span>
+        <button type="button" class="ghost" data-order="A drought is coming. Corner the saffron before anyone else.">Corner saffron</button>
+        <button type="button" class="ghost" data-order="Undercut Kasim on tea and steal his customers.">Undercut Kasim</button>
+        <button type="button" class="ghost" data-order="Hoard silk and sell it to the rich at a premium.">Hoard silk</button>
+      </div>
       <div id="reply" class="reply" hidden></div>
       <form id="cryForm" class="order cry" title="Your crier shouts it once a day. The crowd judges it: a charming cry draws more shoppers for 3 days.">
         <input id="cry" autocomplete="off" maxlength="90" placeholder="📣 Your street cry… e.g. “Saffron so red the sunset is jealous!”" />

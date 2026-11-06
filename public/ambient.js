@@ -142,7 +142,7 @@
     return { x: r.left - sr.left + r.width / 2, top: r.top - sr.top };
   }
   function bubble(m, loud) {
-    const p = stallPos(m.id), text = (m.cry?.text || m.bark || '').trim();
+    const p = stallPos(m.id), text = ((m.player ? m.cry?.text : m.bark) || m.cry?.text || '').trim();
     if (!p || !text || W < 700) return;
     stage.querySelectorAll(`.street-cry[data-id="${m.id}"]`).forEach(e => e.remove());
     const b = document.createElement('div');

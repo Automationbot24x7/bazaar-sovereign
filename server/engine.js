@@ -357,8 +357,22 @@ export function step(w) {
         m.bonds = [];
         log(w, `The Moneylenders' Guild seizes what is left in ${m.name}'s warehouse.`, 'guild');
       }
-    } else if (!m.player && m.bonds?.length && m.gold > debtOf(w, m) + 250) {
-      while (m.bonds.length && m.gold > bondOwed(w, m.bonds[0]) + 250) repay(w, m);
+    } else if (!m.player && m.bonds?.length && netWorth(w, m) < -40) {
+      // underwater: debts exceed everything the house owns. The Guild warns once, then forecloses.
+      m.underwater = (m.underwater || 0) + 1;
+      if (m.underwater === 1) log(w, `The Moneylenders' Guild warns ${m.name}: their debts now exceed everything they own.`, 'guild');
+      else {
+        m.bankrupt = true; m.bankruptDay = w.day;
+        m.bark = 'The Guild took my keys… my charter is for sale.';
+        for (const g of GOODS) m.inventory[g.id] = 0;
+        m.bonds = [];
+        log(w, `The Guild forecloses on ${m.name}: their debts exceed everything they own. Their charter is up for takeover.`, 'bankrupt');
+      }
+    } else {
+      m.underwater = 0;
+      if (!m.player && m.bonds?.length && m.gold > debtOf(w, m) + 250) {
+        while (m.bonds.length && m.gold > bondOwed(w, m.bonds[0]) + 250) repay(w, m);
+      }
     }
   }
   magnateEvening(w);

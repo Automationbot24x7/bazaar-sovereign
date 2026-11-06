@@ -296,3 +296,18 @@ button.danger { border-color: var(--red); color: #ffcfbf; }
 .insp-chain b { color: var(--ink); font-weight: 600; }
 .insp-md { font-family: ui-monospace, monospace; font-size: 11.5px; color: #b8e6c6; background: #13261b; border-radius: 6px; padding: 4px 8px; }
 .insp-chain span { margin-right: 10px; white-space: nowrap; } .insp-chain small { color: var(--muted); }
+
+/* ---------- v11: review fixes ---------- */
+.stage.deciding::before { content: ''; position: absolute; inset: 0; z-index: 3; background: rgba(10,6,4,.6); backdrop-filter: blur(2px); }
+.decision { z-index: 5; }
+input[type=checkbox] { accent-color: var(--gold); }
+#sceneOff { width: 16px; height: 16px; vertical-align: -3px; }
+dialog a, .feed li a, #endProof a { color: #ffd27a; }
+dialog a:hover { color: #fff1c9; }
+.insp code { color: #ffd27a; font-size: 11px; }
+.till { margin-left: 8px; font-size: 11.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.stall .trade { grid-column: 1 / -1; justify-self: start; padding: 3px 10px; font-size: 11.5px; margin-top: -2px; }
+.chips-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; font-size: 12px; }
+.chips-row button { padding: 3px 10px; font-size: 11.5px; border-radius: 999px; }
+.magnate .hits .muted { font-size: 11.5px; }
+.table-banner button { margin-left: 8px; padding: 3px 12px; font-size: 12px; }

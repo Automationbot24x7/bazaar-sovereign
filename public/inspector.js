@@ -35,10 +35,12 @@
     if (!chain.contract || !m.tokenId || !m.wallet) return;
     const out = row.querySelector('.insp-chain');
     try {
-      const [nft, acct, bal] = await Promise.all([
+      const [nft, acct, bal, vault, keys] = await Promise.all([
         view(chain.contract, 'nft_token', { token_id: m.tokenId }),
         account(m.wallet),
         view(chain.contract, 'mt_batch_balance_of', { account_id: m.wallet, token_ids: GOODS }),
+        view(chain.contract, 'vault_of', { token_id: m.tokenId }).catch(() => '0'),
+        view(chain.contract, 'signers_of', { account_id: m.owner || m.wallet }).catch(() => []),
       ]);
       const md = nft?.metadata || {};
       const goods = GOODS.map((g, i) => {
@@ -47,6 +49,7 @@
       }).join(' ');
       out.innerHTML = `<div><b>Charter NFT</b> <a href="${ex}/nft-token/${chain.contract}/${m.tokenId}" target="_blank" rel="noopener">${esc(m.tokenId)} ↗</a> · owner <a href="${ex}/address/${nft?.owner_id}" target="_blank" rel="noopener">${esc(nft?.owner_id || '?')}</a></div>
         <div class="insp-md">“${esc(md.description || md.title || '')}”</div>
+        <div><b>Charter vault</b> ${near(vault)} NEAR held by the NFT itself; only its owner can spend it${keys.length ? ` · owner signs intents with <code>${esc(keys[0].slice(0, 16))}…</code>` : ''}</div>
         <div><b>Stall wallet</b> <a href="${ex}/address/${m.wallet}" target="_blank" rel="noopener">${esc(m.wallet)} ↗</a> · ${near(acct.amount)} NEAR</div>
         <div><b>Goods on chain (NEP-245)</b> ${goods}</div>`;
     } catch (e) { out.textContent = `Could not read the chain right now (${e.message}).`; }
@@ -56,7 +59,7 @@
     const st = typeof S !== 'undefined' ? S : null; if (!st) return;
     const chain = st.chain || {};
     $('#inspNote').innerHTML = chain.contract
-      ? `Live table ${chain.table}: read just now from NEAR testnet, contract <a href="${chain.explorer}/address/${chain.contract}" target="_blank" rel="noopener">${esc(chain.contract)} ↗</a>. Each charter's record is rewritten on chain every 5 days of play. Nothing is signed from this window.`
+      ? `Live table ${chain.table}: read just now from NEAR testnet, contract <a href="${chain.explorer}/address/${chain.contract}" target="_blank" rel="noopener">${esc(chain.contract)} ↗</a>. Each charter's record and stock are written to the chain every 5 days of play; deals and fees settle on chain as they happen. This panel only reads.`
       : 'This is a practice table, so its chain entries are simulated. Start a new season while a live table is free to settle on NEAR testnet. The minds below are real either way.';
     $('#inspBody').innerHTML = '';
     for (const m of st.merchants) house(m, chain);

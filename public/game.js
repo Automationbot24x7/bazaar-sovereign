@@ -16,7 +16,7 @@ const STANCE_HINT = {
   premium: 'Few sales, fat margins, loyal rich customers.',
   liquidate: 'Dump stock for cash. Use when you’re about to go under.',
 };
-const FEED_ICON = { mint: '📜', wallet: '👛', transfer: '↩', goods: '⚖', update: '✎', settle: '🪙', escrow: '🔒', deal: '🤝', pay: '🪙', listed: '🏷', takeover: '♛', loan: '🏦', error: '⚠' };
+const FEED_ICON = { intent: '✍', vault: '🏺', mint: '📜', wallet: '👛', transfer: '↩', goods: '⚖', update: '✎', settle: '🪙', escrow: '🔒', deal: '🤝', pay: '🪙', listed: '🏷', takeover: '♛', loan: '🏦', error: '⚠' };
 const SPEEDS = [2500, 1200, 600];
 const dh = n => `${Math.round(n).toLocaleString()} coins`;
 let S = null, speedIdx = 0, prevBarks = {}, dealWith = null;
@@ -47,7 +47,7 @@ function stallPortrait(card, m) {
 function stalls() {
   const box = $('#stalls');
   S.merchants.forEach((m, i) => {
-    const pnl = m.lastPnl, owner = m.ownedBy ? merchant(m.ownedBy) : null;
+    const nh = m.netHistory || [], pnl = nh.length > 1 ? Math.round(nh.at(-1) - nh.at(-2)) : 0, owner = m.ownedBy ? merchant(m.ownedBy) : null;
     const tradable = !m.player && m.trading && !m.vassal && !S.over;
     let card = box.querySelector(`:scope > .stall[data-id="${m.id}"]`);
     if (!card) {
@@ -64,12 +64,13 @@ function stalls() {
     card.querySelector('.stall-body').innerHTML = `
       <div>
         <h3>${esc(m.name)}${m.charters > 1 ? ` <span class="crowns" title="Charters held">${'♛'.repeat(m.charters)}</span>` : ''}${!m.player && m.mood ? ` <span class="mood ${m.mood.key}" title="Attitude toward you">${m.mood.label}</span>` : ''}</h3>
-        <div class="nw">${m.netWorth.toLocaleString()}<small> coins net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}" title="Profit or loss yesterday">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
+        <div class="nw">${m.netWorth.toLocaleString()}<small> coins net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}" title="Change in net worth since yesterday">${pnl >= 0 ? '+' : ''}${pnl}</span><span class="till" title="Coins in the till (cash). Net worth also counts stock and debts.">💰 ${Math.round(m.gold)}</span></div>
         <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>${m.helpers ? ` <span class="perk" title="${m.helpers} hired helper(s), ${m.helperDays} day(s) left">👥${m.helpers}</span>` : ''}${m.awning ? ' <span class="perk" title="Awning: safe from sudden storms">☂</span>' : ''}
         ${S.ai === 'live' && m.modelLabel && !m.vassal ? `<span class="brain" title="${esc(m.player ? 'Your factor' : m.name)} — ${esc(m.modelLabel)}${m.thinkMs ? `, last decision took ${(m.thinkMs / 1000).toFixed(1)}s` : ''}">${m.thinking ? '<i class="dots"></i>' : '✦'} ${esc(m.modelLabel)}${m.thinkMs ? ` · ${(m.thinkMs / 1000).toFixed(1)}s` : ''}</span>` : ''}
       </div>
       ${m.chips?.length ? `<div class="chips">${m.chips.map(c => `<span class="chip tone-${c.tone}">${esc(c.text)}</span>`).join('')}</div>` : ''}
-      <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
+      ${tradable ? `<button type="button" class="ghost trade" data-trade="${m.id}" title="Buy their goods or their whole house">🤝 Trade</button>` : ''}
+      <div class="bark" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>Charter NFT</span>${m.walletUrl ? `<a href="${m.walletUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="This stall's own NEAR wallet">${esc(m.wallet)} ↗</a>` : `<span title="This stall's own wallet">${esc(m.wallet || '')}</span>`}</div>
       ${m.magnateHeld ? `<div class="owned held">🐫 Charter held by ${esc(S.magnate?.name || 'the Magnate')}</div>` : m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}
       ${m.trading ? `<div class="goodwill" title="Goodwill: shoppers stay loyal to stalls that trade fairly. Gouging, empty shelves and rats lose it."><span>♥ Goodwill</span><i><b style="width:${Math.round((m.goodwill / 0.8) * 100)}%"></b></i>${cryBadge(m)}</div>` : ''}
@@ -160,11 +161,12 @@ function header() {
   $('#seasonBar').style.width = `${Math.min(100, (S.day / S.seasonDays) * 100)}%`;
   $('#events').innerHTML = S.events.map(e => `<span>${esc(e.text)} · ${e.left}d</span>`).join('');
   const r = $('#rumor'); r.hidden = !S.rumor; r.textContent = S.rumor ? `Rumor: ${S.rumor}` : '';
-  $('#play').textContent = S.over ? '🏁 Season over' : S.running ? '⏸ Pause' : '▶ Open the bazaar';
+  $('#play').textContent = S.over ? '🏁 Season over' : S.running ? '⏸ Pause' : S.day > 0 ? '▶ Resume' : '▶ Open the bazaar';
   $('#play').disabled = S.over; $('#sim').disabled = S.over;
   const me = S.merchants.find(m => m.player);
   $('#houseCharter').textContent = `· ${dh(me.gold)} in the till`;
   if ($('#houseTitle').textContent !== me.name) $('#houseTitle').textContent = me.name;
+  if (!me.cry && !$('#cryReply').hidden && /charm/.test($('#cryReply').textContent)) $('#cryReply').hidden = true;
   document.querySelectorAll('#stances button').forEach(btn => btn.classList.toggle('on', btn.dataset.s === me.doctrine.stance));
   if (document.activeElement !== $('#focus')) $('#focus').value = me.doctrine.focus || '';
   if (document.activeElement !== $('#aggr')) $('#aggr').value = me.doctrine.aggression;
@@ -185,16 +187,17 @@ function header() {
     const tables = S.liveTables > 1 ? `All ${S.liveTables} live NEAR tables are` : 'The live NEAR table is';
     const lost = S.seatLost ? 'Your live seat was released while you were away. ' : '';
     b.innerHTML = S.liveBusy ? `<b>Practice table.</b> ${lost}${tables} taken right now. Your game plays exactly the same; its on-chain entries are simulated.`
-      : S.liveTables ? `<b>Practice table.</b> ${lost}A live NEAR table is free: start a new season to play on-chain.`
+      : S.liveTables ? `<b>Practice table.</b> ${lost}A live NEAR table is free right now. <button class="primary" id="goLive">Play on NEAR testnet</button>`
       : '<b>Practice table.</b> On-chain entries are simulated.';
   }
+  const gl = $('#goLive'); if (gl) gl.onclick = () => { gl.disabled = true; api('/api/reset', {}).then(render).catch(e => alert(e.message)); };
   $('#foot').innerHTML = S.chain.mode === 'testnet' ? `Contract <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">${S.chain.contract}</a> · Treasury <a href="${S.chain.explorer}/address/${S.chain.treasury}" target="_blank" rel="noopener">${S.chain.treasury}</a> · 1 coin = ${S.chain.goldToNear} NEAR` : 'Bazaar Sovereign · built for NEAR HACKATHON 2026';
 }
 
 let endShown = false;
 function end() {
   if (!S.over || !S.result) { endShown = false; return; }
-  if (endShown) return;
+  if (endShown || scenePlaying) return;
   endShown = true;
   const r = S.result;
   $('#endTitle').textContent = r.reason === 'sovereign' ? '♛ Sovereign of the Bazaar ♛' : r.reason === 'bankrupt' ? 'Your house has fallen' : r.reason === 'magnate' ? '🐫 The Magnate owns the bazaar' : r.win ? 'Richest house in the bazaar!' : 'The season ends';
@@ -209,6 +212,7 @@ function end() {
 function decision() {
   const d = S.decision, el = $('#decision');
   el.hidden = !d;
+  document.querySelector('.stage').classList.toggle('deciding', !!d);   // dim the board behind a decision
   if (!d) return;
   el.className = `decision kind-${d.kind}`; // prefixed: bare "palace" or "magnate" would pick up those panels' styles
   el.innerHTML = `<div class="dt">${esc(d.title)} <span class="muted">· day ${d.day}, the bazaar waits for you</span></div><p>${esc(d.text)}</p><div class="da">${d.actions.map((a, i) => `<button class="${i === 0 ? 'primary' : 'ghost'}" data-i="${i}">${esc(a.label)}</button>`).join('')}</div>`;
@@ -247,6 +251,8 @@ const refresh = () => api('/api/state').then(render).catch(() => {});
 // ---------- deal drawer ----------
 function dealMeta() {
   const m = merchant(dealWith);
+  const held = Math.floor(m.inventory?.[$('#dGood').value] || 0);
+  if (Number($('#dQty').value) > held) $('#dQty').value = Math.max(held, 0);
   $('#dealMeta').innerHTML = `${m.mood ? `<span class="mood ${m.mood.key}">${m.mood.label}</span> · ` : ''}${dh(m.netWorth)} net · stock: ${Object.entries(m.inventory).filter(([, q]) => q).map(([g, q]) => `${q} ${q === 1 ? unitOf(g) : unitsOf(g)} of ${goodName(g).toLowerCase()}`).join(', ') || 'none'}`;
   $('#bHint').textContent = `Their house is worth about ${dh(m.buyoutHint || 0)}. You have ${dh(S.me.gold)}.`;
   const q = Number($('#dQty').value), p = Number($('#dPrice').value);
@@ -337,6 +343,8 @@ $('#stalls').onclick = e => {
 };
 $('#stalls').onkeydown = e => { const card = e.target.closest('.stall.clickable'); if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDeal(card.dataset.id); } };
 $('#palace').onclick = e => { if (e.target.id === 'claim') api('/api/contract', { id: e.target.dataset.id }).then(render).catch(err => alert(err.message)); };
+// one-click example orders for your factor
+document.querySelectorAll('#orderChips button').forEach(b => b.onclick = () => { $('#order').value = b.dataset.order; $('#orderForm').requestSubmit(); });
 $('#cryForm').onsubmit = async e => {
   e.preventDefault();
   const text = $('#cry').value.trim(), btn = $('#cryBtn');
@@ -444,7 +452,7 @@ function magnate() {
     ${mg.stage === 'dumping' ? `<div class="mrow"><span class="muted">Buy off his carts (${mg.raidLeft} of ${mg.raidCap} left today, delivered overnight${mg.incoming ? ` · ${mg.incoming} on the way` : ''}):</span>
       ${mg.goods.map(g => { const n = Math.min(mg.raidLeft, Math.floor(S.me.gold / mg.prices[g])); return `<button class="primary" data-raid="${g}" ${n ? '' : 'disabled'} title="${n ? '' : 'Not enough coins in the till: borrow from the Guild below'}">Buy ${n || mg.raidLeft || mg.raidCap} ${gname(g)} · ${dh(mg.prices[g] * (n || mg.raidLeft || mg.raidCap))}</button>`; }).join(' ')}</div>
     <div class="mrow"><span class="muted">Pact:</span> ${pact} ${unasked ? '<button class="ghost" data-pact="">Rally them all</button>' : ''}</div>` : ''}
-    ${mg.hits.length ? `<div class="hits">${mg.hits.map(h => `<span>${esc(h.by === 'you' ? 'You' : h.name)} <em class="hit">−${h.hurt}</em></span>`).join('')}</div>` : ''}`;
+    ${mg.hits.length ? `<div class="hits"><span class="muted">Carts bought off, patience it cost him:</span>${mg.hits.map(h => `<span>${esc(h.by === 'you' ? 'You' : h.name)} <em class="hit">−${h.hurt}</em></span>`).join('')}</div>` : ''}`;
 }
 
 
@@ -645,7 +653,7 @@ function motion() {
     hit: S.magnate?.hits?.[0] ? `${S.magnate.hits[0].day}:${S.magnate.hits[0].by}:${S.magnate.hits[0].hurt}` : '',
     stage: S.magnate?.stage || '',
   };
-  if (fxPrev && !S.over) {
+  if (fxPrev && !S.over && !S.decision) {   // a decision has the stage: no floating numbers over it
     if (now.day !== fxPrev.day) {
       pulse($('#day'), 'fx-tick');
       // each stall's result for the day floats up from its card
