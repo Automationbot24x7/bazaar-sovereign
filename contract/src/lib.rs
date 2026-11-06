@@ -6,9 +6,15 @@
 //! bankruptcy. When a merchant goes bankrupt its charter can be taken over — the NFT
 //! moves to the buyer and the whole business (wallet, stock, debts) goes with it.
 //!
+//! Goods (saffron, silk, tea, salt) are NEP-245 multi-tokens held by merchant wallets.
+//! Merchants move goods between themselves with `mt_transfer`, signed by their own
+//! wallet. The Vizier only mirrors market activity with suppliers and townsfolk
+//! (`sync_goods`: mint on wholesale purchase, burn on retail sale).
+//!
 //! The game server is the contract owner ("the Vizier"): it mints charters, writes
-//! daily state, and executes takeovers. Anyone can read charters with the standard
-//! NFT view methods or `get_charter`.
+//! daily state, and lists distressed or agreed-sale charters. A listed charter is
+//! bought by the *buyer's own wallet* with `buy_charter`, attaching the price in NEAR:
+//! payment to the treasury and NFT transfer happen in one transaction.
 
 use near_contract_standards::non_fungible_token::core::{NonFungibleTokenCore, NonFungibleTokenResolver};
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
@@ -21,7 +27,7 @@ use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::LookupMap;
-use near_sdk::{env, near, require, AccountId, BorshStorageKey, NearSchema, PanicOnDefault, PromiseOrValue};
+use near_sdk::{assert_one_yocto, env, near, require, AccountId, BorshStorageKey, NearSchema, NearToken, PanicOnDefault, Promise, PromiseOrValue};
 use std::collections::HashMap;
 
 #[derive(BorshStorageKey)]
@@ -33,6 +39,19 @@ enum StorageKey {
     Enumeration,
     Approval,
     Charters,
+    Goods,
+    GoodsSupply,
+    Listings,
+}
+
+pub const GOODS: [&str; 4] = ["saffron", "silk", "tea", "salt"];
+
+#[derive(Serialize, Deserialize, NearSchema)]
+#[serde(crate = "near_sdk::serde")]
+pub struct GoodsHolding {
+    pub account_id: AccountId,
+    pub token_id: String,
+    pub amount: U128,
 }
 
 /// Live state of a merchant business, mirrored into the NFT's `extra` field.
@@ -69,6 +88,24 @@ pub struct Contract {
     metadata: LazyOption<NFTContractMetadata>,
     charters: LookupMap<TokenId, Charter>,
     day: u32,
+    treasury: AccountId,
+    /// NEP-245 balances, key = "<good>|<account>"
+    goods: LookupMap<String, u128>,
+    goods_supply: LookupMap<String, u128>,
+    /// charter token_id -> price in yoctoNEAR
+    listings: LookupMap<TokenId, u128>,
+}
+
+fn mt_event(kind: &str, data: serde_json::Value) {
+    env::log_str(&format!("EVENT_JSON:{}", json!({ "standard": "nep245", "version": "1.0.0", "event": kind, "data": [data] })));
+}
+
+fn gkey(good: &str, account: &AccountId) -> String {
+    format!("{}|{}", good, account)
+}
+
+fn assert_good(good: &str) {
+    require!(GOODS.contains(&good), "Unknown good");
 }
 
 fn event(kind: &str, data: serde_json::Value) {
@@ -81,7 +118,7 @@ fn event(kind: &str, data: serde_json::Value) {
 #[near]
 impl Contract {
     #[init]
-    pub fn new(owner_id: AccountId) -> Self {
+    pub fn new(owner_id: AccountId, treasury_id: AccountId) -> Self {
         let metadata = NFTContractMetadata {
             spec: NFT_METADATA_SPEC.to_string(),
             name: "Bazaar Sovereign Charters".to_string(),
@@ -102,6 +139,10 @@ impl Contract {
             metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
             charters: LookupMap::new(StorageKey::Charters),
             day: 0,
+            treasury: treasury_id,
+            goods: LookupMap::new(StorageKey::Goods),
+            goods_supply: LookupMap::new(StorageKey::GoodsSupply),
+            listings: LookupMap::new(StorageKey::Listings),
         }
     }
 
@@ -226,6 +267,136 @@ impl Contract {
         );
     }
 
+    // ---------- charter sales: listed by the Vizier, bought by the buyer's wallet ----------
+
+    /// List a charter for sale (a bankruptcy seizure, or a buyout the owner agreed to).
+    pub fn list_charter(&mut self, token_id: TokenId, price: U128, reason: String) {
+        self.assert_vizier();
+        require!(self.charters.get(&token_id).is_some(), "Unknown charter");
+        self.listings.insert(token_id.clone(), price.0);
+        event("charter_listed", json!({ "token_id": token_id, "price": price, "reason": reason }));
+    }
+
+    /// Buy a listed charter. The caller (the buyer's merchant wallet) attaches the price;
+    /// the NEAR goes to the treasury and the NFT moves to the caller in the same transaction.
+    #[payable]
+    pub fn buy_charter(&mut self, token_id: TokenId, buyer_token_id: Option<TokenId>) {
+        let price = self.listings.get(&token_id).copied().expect("Charter is not for sale");
+        let deposit = env::attached_deposit().as_yoctonear();
+        require!(deposit >= price, "Attached deposit is below the listing price");
+        let buyer = env::predecessor_account_id();
+        let owner = self.tokens.owner_by_id.get(&token_id).expect("No owner");
+        require!(owner != buyer, "You already own this charter");
+        self.tokens.internal_transfer(&owner, &buyer, &token_id, None, Some("Charter bought".to_string()));
+        self.listings.remove(&token_id);
+        if let Some(bt) = buyer_token_id.clone() {
+            if let Some(mut b) = self.charters.get(&bt).cloned() {
+                b.takeovers += 1;
+                b.absorbed.push(token_id.clone());
+                self.write_metadata(&bt, &b);
+                self.charters.insert(bt, b);
+            }
+        }
+        Promise::new(self.treasury.clone()).transfer(NearToken::from_yoctonear(deposit)).detach();
+        event("charter_sold", json!({ "token_id": token_id, "from": owner, "to": buyer, "price": U128(deposit), "buyer_token_id": buyer_token_id }));
+    }
+
+    pub fn get_listing(&self, token_id: TokenId) -> Option<U128> {
+        self.listings.get(&token_id).map(|p| U128(*p))
+    }
+
+    pub fn get_treasury(&self) -> AccountId {
+        self.treasury.clone()
+    }
+
+    // ---------- NEP-245 goods ----------
+
+    fn set_balance(&mut self, good: &str, account: &AccountId, amount: u128) {
+        let key = gkey(good, account);
+        let old = self.goods.get(&key).copied().unwrap_or(0);
+        if old == amount {
+            return;
+        }
+        let supply = self.goods_supply.get(good).copied().unwrap_or(0);
+        if amount > old {
+            self.goods_supply.insert(good.to_string(), supply + (amount - old));
+            mt_event("mt_mint", json!({ "owner_id": account, "token_ids": [good], "amounts": [U128(amount - old)], "memo": "bought from suppliers" }));
+        } else {
+            self.goods_supply.insert(good.to_string(), supply.saturating_sub(old - amount));
+            mt_event("mt_burn", json!({ "owner_id": account, "token_ids": [good], "amounts": [U128(old - amount)], "memo": "sold to townsfolk" }));
+        }
+        if amount == 0 {
+            self.goods.remove(&key);
+        } else {
+            self.goods.insert(key, amount);
+        }
+    }
+
+    /// Vizier mirrors trades with suppliers/townsfolk: sets exact balances, minting or burning the difference.
+    pub fn sync_goods(&mut self, holdings: Vec<GoodsHolding>) {
+        self.assert_vizier();
+        for h in holdings {
+            assert_good(&h.token_id);
+            self.set_balance(&h.token_id, &h.account_id, h.amount.0);
+        }
+    }
+
+    fn internal_mt_transfer(&mut self, sender: &AccountId, receiver: &AccountId, good: &str, amount: u128) {
+        assert_good(good);
+        require!(amount > 0, "Amount must be positive");
+        require!(sender != receiver, "Sender and receiver must differ");
+        let from_key = gkey(good, sender);
+        let bal = self.goods.get(&from_key).copied().unwrap_or(0);
+        require!(bal >= amount, "Insufficient balance");
+        let left = bal - amount;
+        if left == 0 { self.goods.remove(&from_key); } else { self.goods.insert(from_key, left); }
+        let to_key = gkey(good, receiver);
+        let to = self.goods.get(&to_key).copied().unwrap_or(0);
+        self.goods.insert(to_key, to + amount);
+    }
+
+    #[payable]
+    pub fn mt_transfer(&mut self, receiver_id: AccountId, token_id: String, amount: U128, approval: Option<(AccountId, u64)>, memo: Option<String>) {
+        assert_one_yocto();
+        require!(approval.is_none(), "Approvals are not supported");
+        let sender = env::predecessor_account_id();
+        self.internal_mt_transfer(&sender, &receiver_id, &token_id, amount.0);
+        mt_event("mt_transfer", json!({ "old_owner_id": sender, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [amount], "memo": memo }));
+    }
+
+    #[payable]
+    pub fn mt_batch_transfer(&mut self, receiver_id: AccountId, token_ids: Vec<String>, amounts: Vec<U128>, approvals: Option<Vec<Option<(AccountId, u64)>>>, memo: Option<String>) {
+        assert_one_yocto();
+        require!(approvals.is_none(), "Approvals are not supported");
+        require!(token_ids.len() == amounts.len(), "Length mismatch");
+        let sender = env::predecessor_account_id();
+        for (t, a) in token_ids.iter().zip(amounts.iter()) {
+            self.internal_mt_transfer(&sender, &receiver_id, t, a.0);
+        }
+        mt_event("mt_transfer", json!({ "old_owner_id": sender, "new_owner_id": receiver_id, "token_ids": token_ids, "amounts": amounts, "memo": memo }));
+    }
+
+    pub fn mt_balance_of(&self, account_id: AccountId, token_id: String) -> U128 {
+        U128(self.goods.get(&gkey(&token_id, &account_id)).copied().unwrap_or(0))
+    }
+
+    pub fn mt_batch_balance_of(&self, account_id: AccountId, token_ids: Vec<String>) -> Vec<U128> {
+        token_ids.iter().map(|t| U128(self.goods.get(&gkey(t, &account_id)).copied().unwrap_or(0))).collect()
+    }
+
+    pub fn mt_supply(&self, token_id: String) -> Option<U128> {
+        if !GOODS.contains(&token_id.as_str()) { return None; }
+        Some(U128(self.goods_supply.get(&token_id).copied().unwrap_or(0)))
+    }
+
+    pub fn mt_batch_supply(&self, token_ids: Vec<String>) -> Vec<Option<U128>> {
+        token_ids.into_iter().map(|t| self.mt_supply(t)).collect()
+    }
+
+    pub fn mt_token(&self, token_ids: Vec<String>) -> Vec<Option<serde_json::Value>> {
+        token_ids.iter().map(|t| if GOODS.contains(&t.as_str()) { Some(json!({ "token_id": t, "owner_id": null })) } else { None }).collect()
+    }
+
     pub fn get_charter(&self, token_id: TokenId) -> Option<Charter> {
         self.charters.get(&token_id).cloned()
     }
@@ -314,7 +485,7 @@ mod tests {
     #[test]
     fn mint_update_takeover() {
         testing_env!(ctx(accounts(0)).build());
-        let mut c = Contract::new(accounts(0));
+        let mut c = Contract::new(accounts(0), accounts(5));
         c.mint_charter("charter-ozzo".into(), accounts(0), "Brother Ozzo".into(), accounts(2), "schemer".into(), None);
         c.mint_charter("charter-player".into(), accounts(1), "Your House".into(), accounts(3), "player".into(), None);
 
@@ -331,10 +502,70 @@ mod tests {
     }
 
     #[test]
+    fn goods_sync_and_wallet_signed_transfer() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(2), token_id: "saffron".into(), amount: U128(30) }]);
+        assert_eq!(c.mt_supply("saffron".into()).unwrap().0, 30);
+        // the merchant wallet itself signs the transfer
+        let mut b = ctx(accounts(2));
+        b.attached_deposit(NearToken::from_yoctonear(1));
+        testing_env!(b.build());
+        c.mt_transfer(accounts(3), "saffron".into(), U128(12), None, Some("deal".into()));
+        assert_eq!(c.mt_balance_of(accounts(2), "saffron".into()).0, 18);
+        assert_eq!(c.mt_balance_of(accounts(3), "saffron".into()).0, 12);
+        assert_eq!(c.mt_supply("saffron".into()).unwrap().0, 30);
+        // vizier burns on retail sale
+        testing_env!(ctx(accounts(0)).build());
+        c.sync_goods(vec![GoodsHolding { account_id: accounts(3), token_id: "saffron".into(), amount: U128(2) }]);
+        assert_eq!(c.mt_supply("saffron".into()).unwrap().0, 20);
+    }
+
+    #[test]
+    #[should_panic(expected = "Insufficient balance")]
+    fn cannot_send_goods_you_do_not_have() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        let mut b = ctx(accounts(2));
+        b.attached_deposit(NearToken::from_yoctonear(1));
+        testing_env!(b.build());
+        c.mt_transfer(accounts(3), "silk".into(), U128(1), None, None);
+    }
+
+    #[test]
+    fn buyer_wallet_buys_listed_charter() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.mint_charter("charter-ozzo".into(), accounts(2), "Brother Ozzo".into(), accounts(2), "schemer".into(), None);
+        c.mint_charter("charter-player".into(), accounts(3), "Your House".into(), accounts(3), "player".into(), None);
+        c.list_charter("charter-ozzo".into(), U128(1000), "bankrupt".into());
+        let mut b = ctx(accounts(3));
+        b.attached_deposit(NearToken::from_yoctonear(1000));
+        testing_env!(b.build());
+        c.buy_charter("charter-ozzo".into(), Some("charter-player".into()));
+        assert_eq!(c.nft_token("charter-ozzo".into()).unwrap().owner_id, accounts(3));
+        assert!(c.get_listing("charter-ozzo".into()).is_none());
+        assert_eq!(c.get_charter("charter-player".into()).unwrap().absorbed, vec!["charter-ozzo".to_string()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "below the listing price")]
+    fn underpaying_for_a_charter_fails() {
+        testing_env!(ctx(accounts(0)).build());
+        let mut c = Contract::new(accounts(0), accounts(5));
+        c.mint_charter("charter-vey".into(), accounts(2), "Lady Vey".into(), accounts(2), "noble".into(), None);
+        c.list_charter("charter-vey".into(), U128(1000), "buyout".into());
+        let mut b = ctx(accounts(3));
+        b.attached_deposit(NearToken::from_yoctonear(999));
+        testing_env!(b.build());
+        c.buy_charter("charter-vey".into(), None);
+    }
+
+    #[test]
     #[should_panic(expected = "Only the Vizier")]
     fn only_vizier_mints() {
         testing_env!(ctx(accounts(0)).build());
-        let mut c = Contract::new(accounts(0));
+        let mut c = Contract::new(accounts(0), accounts(5));
         testing_env!(ctx(accounts(1)).build());
         c.mint_charter("x".into(), accounts(1), "x".into(), accounts(2), "x".into(), None);
     }
@@ -343,7 +574,7 @@ mod tests {
     #[should_panic(expected = "Only bankrupt")]
     fn no_takeover_of_healthy_merchant() {
         testing_env!(ctx(accounts(0)).build());
-        let mut c = Contract::new(accounts(0));
+        let mut c = Contract::new(accounts(0), accounts(5));
         c.mint_charter("charter-vey".into(), accounts(0), "Lady Vey".into(), accounts(2), "noble".into(), None);
         c.takeover("charter-vey".into(), accounts(1), 10, "charter-vey".into());
     }

@@ -7,10 +7,10 @@ import { join } from 'node:path';
 
 const ROOT = process.env.NEAR_ACCOUNT_ID;
 if (!ROOT) throw new Error('Set NEAR_ACCOUNT_ID');
-const KEY = process.env.NEAR_PRIVATE_KEY || JSON.parse(readFileSync(join(homedir(), '.near-credentials', 'testnet', `${ROOT}.json`), 'utf8')).private_key;
+const KEY = process.env.NEAR_PRIVATE_KEY || JSON.parse(readFileSync(join(process.env.NEAR_KEY_DIR || join(homedir(), '.near-credentials', 'testnet'), `${ROOT}.json`), 'utf8')).private_key;
 const provider = new JsonRpcProvider({ url: process.env.NEAR_RPC || 'https://rpc.testnet.near.org' });
 const root = new Account(ROOT, provider, KEY);
-const CONTRACT = process.env.NEAR_CONTRACT_ID || `charters.${ROOT}`;
+const CONTRACT = process.env.NEAR_CONTRACT_ID || `bazaar.${ROOT}`;
 const wasm = readFileSync(new URL('../contract/out/bazaar_charters.wasm', import.meta.url));
 
 console.log(`root ${ROOT} balance: ${yoctoToNear(await root.getBalance())} NEAR`);
@@ -23,7 +23,7 @@ const contract = new Account(CONTRACT, provider, KEY);
 const d = await contract.deployContract(wasm);
 console.log('deployed', wasm.length, 'bytes', d.transaction.hash);
 try {
-  const i = await contract.callFunctionRaw({ contractId: CONTRACT, methodName: 'new', args: { owner_id: ROOT } });
+  const i = await contract.callFunctionRaw({ contractId: CONTRACT, methodName: 'new', args: { owner_id: ROOT, treasury_id: `treasury.${ROOT}` } });
   console.log('initialised, Vizier =', ROOT, i.transaction.hash);
 } catch (e) {
   console.log('init skipped (already initialised?):', e.message.slice(0, 120));

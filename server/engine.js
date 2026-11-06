@@ -27,6 +27,7 @@ function rng(seed) {
 }
 
 export const RENT = 18;
+export const SEASON_DAYS = 30;
 export const BAZAAR_TAX = 0.08; // the Vizier takes a cut of every retail sale
 
 export function createWorld({ seed = 7, merchants }) {
@@ -43,10 +44,13 @@ export function createWorld({ seed = 7, merchants }) {
       doctrine: { stance: 'steady', focus: null, aggression: 0.5 }, bark: '', ...m,
     })),
     ledger: [],        // per-day settlement rows for the chain layer
+    contracts: [],     // Palace orders: {id, good, qty, reward, due, takenBy, status}
+    over: false, result: null,
   };
 }
 
-const log = (w, text, kind = 'info') => { w.news.unshift({ day: w.day, text, kind }); w.news.length = Math.min(w.news.length, 60); };
+export const trading = m => !m.bankrupt && !m.ownedBy;
+export const log = (w, text, kind = 'info') => { w.news.unshift({ day: w.day, text, kind }); w.news.length = Math.min(w.news.length, 60); };
 
 export function netWorth(w, m) {
   return m.gold + GOODS.reduce((t, g) => t + m.inventory[g.id] * w.prices[g.id] * 0.8, 0);
@@ -63,10 +67,55 @@ function modifiers(w) {
   return { sup, dem, rent };
 }
 
+// Stock a merchant has promised to the Palace and must not sell at retail.
+export function reserved(w, m, good) {
+  return w.contracts.filter(c => c.status === 'open' && c.takenBy === m.id && c.good === good).reduce((t, c) => t + c.qty, 0);
+}
+
+function palace(w) {
+  // deliveries: a reserved order is fulfilled the moment its taker holds enough stock;
+  // an unreserved one goes to the first merchant (largest stock first) who can fill it.
+  for (const c of w.contracts.filter(c => c.status === 'open')) {
+    const candidates = c.takenBy ? w.merchants.filter(m => m.id === c.takenBy) : w.merchants.filter(trading).sort((a, b) => b.inventory[c.good] - a.inventory[c.good]);
+    const m = candidates.find(m => trading(m) && m.inventory[c.good] >= c.qty);
+    if (m) {
+      m.inventory[c.good] -= c.qty; m.gold += c.reward; m.contractsWon = (m.contractsWon || 0) + 1;
+      c.status = 'delivered'; c.deliveredBy = m.id;
+      log(w, `${m.name} delivered ${c.qty} ${G[c.good].name} to the Palace and was paid ${c.reward} gold!`, 'palace');
+      if (!m.player) m.bark = 'The Palace pays in gold, and I deliver in full.';
+    } else if (w.day > c.due) {
+      c.status = 'failed';
+      if (c.takenBy) {
+        const t = w.merchants.find(x => x.id === c.takenBy), fine = Math.round(c.reward * 0.25);
+        t.gold -= fine;
+        log(w, `${t.name} failed the Palace order and was fined ${fine} gold.`, 'bankrupt');
+      } else log(w, `The Palace order for ${G[c.good].name} went unfilled.`, 'info');
+    }
+  }
+  // a new order roughly every 6 days (first on day 3), at most one open at a time
+  if (!w.over && !w.contracts.some(c => c.status === 'open') && (w.day === 3 || (w.day > 3 && w.rand() < 0.18))) {
+    const g = GOODS[Math.floor(w.rand() * GOODS.length)];
+    const qty = Math.round(g.supply * (1 + w.rand() * 0.6));
+    const c = { id: `PO-${w.day}`, good: g.id, qty, reward: Math.round(qty * g.base * (1.9 + w.rand() * 0.6)), due: w.day + 5, takenBy: null, status: 'open', posted: w.day };
+    w.contracts.unshift(c);
+    log(w, `The Palace wants ${qty} ${g.name} by day ${c.due}, paying ${c.reward} gold.`, 'palace');
+  }
+  w.contracts.length = Math.min(w.contracts.length, 12);
+}
+
+export function acceptContract(w, m, id) {
+  const c = w.contracts.find(c => c.id === id);
+  if (!c || c.status !== 'open') throw new Error('That order is no longer open');
+  if (c.takenBy) throw new Error('Someone already holds that order');
+  c.takenBy = m.id;
+  log(w, `${m.name} accepted the Palace order for ${c.qty} ${G[c.good].name}. Stock is now reserved.`, 'palace');
+  return c;
+}
+
 // Turn a high-level doctrine into concrete orders for one good.
 function orders(w, m, g, rivals) {
   const d = m.doctrine, a = d.aggression ?? 0.5, focus = d.focus === g.id;
-  const stock = m.inventory[g.id], unitCost = m.cost[g.id] || g.base * 0.6;
+  const stock = Math.max(0, m.inventory[g.id] - reserved(w, m, g.id)), unitCost = m.cost[g.id] || g.base * 0.6;
   const wholesale = g.base * 0.62;
   const rivalMin = Math.min(...rivals.filter(r => r.inventory[g.id] > 0).map(r => r.lastAsk?.[g.id] ?? Infinity));
   let buyQty = Math.round(g.supply * 0.25), maxBid = wholesale * 1.05, ask = Math.max(unitCost, wholesale) * 1.35, floor = unitCost * 1.02;
@@ -117,7 +166,7 @@ export function step(w) {
     log(w, `Rumor: ${e.rumor}`, 'rumor');
   }
   const { sup, dem, rent } = modifiers(w);
-  const alive = w.merchants.filter(m => !m.bankrupt);
+  const alive = w.merchants.filter(trading);
   const pnl = Object.fromEntries(w.merchants.map(m => [m.id, 0]));
 
   for (const g of GOODS) {
@@ -149,17 +198,18 @@ export function step(w) {
       b.m.inventory[g.id] -= q; b.m.gold += net; pnl[b.m.id] += net;
       trades.push({ day: w.day, merchant: b.m.id, side: 'sell', good: g.id, qty: q, price: b.ask });
     };
-    const sellers = book.filter(b => b.m.inventory[g.id] > 0);
+    const avail = b => Math.max(0, b.m.inventory[g.id] - reserved(w, b.m, g.id));
+    const sellers = book.filter(b => avail(b) > 0);
     for (const b of book) b.m.lastAsk = { ...(b.m.lastAsk || {}), [g.id]: b.ask };
     // loyal regulars: a slice of shoppers sticks to each stall if the price isn't absurd
     for (const b of sellers) {
       const loyal = Math.round(A * (b.m.doctrine.stance === 'premium' ? 0.14 : 0.07) * Math.max(0, 1 - b.ask / (choke * 0.9)) * 1.6);
-      sell(b, Math.min(b.m.inventory[g.id], loyal));
+      sell(b, Math.min(avail(b), loyal));
     }
     // everyone else buys from the cheapest stall that still has stock
     for (const b of sellers.sort((x, y) => x.ask - y.ask)) {
       const room = Q(b.ask) - served;
-      const q = Math.max(0, Math.min(b.m.inventory[g.id], room));
+      const q = Math.max(0, Math.min(avail(b), room));
       served += q; sell(b, q);
     }
     // market price = volume-weighted ask, or drifts up when nobody sells (scarcity)
@@ -169,6 +219,11 @@ export function step(w) {
     w.history[g.id].push(w.prices[g.id]);
     if (w.history[g.id].length > 120) w.history[g.id].shift();
   }
+
+  // ---- the Palace: deliveries, deadlines, new orders ----
+  const before = Object.fromEntries(w.merchants.map(m => [m.id, m.gold]));
+  palace(w);
+  for (const m of w.merchants) pnl[m.id] += m.gold - before[m.id];
 
   // ---- costs, spoilage, bankruptcy ----
   for (const m of alive) {
@@ -198,6 +253,7 @@ export function step(w) {
   for (const e of w.active.filter(e => e.left <= 0)) log(w, `${e.text} has ended.`, 'info');
   w.active = w.active.filter(e => e.left > 0);
 
+  checkSeason(w);
   const settlement = w.merchants.map(m => ({ merchant: m.id, pnl: m.lastPnl })).filter(r => r.pnl !== 0);
   w.ledger.push({ day: w.day, settlement, trades: trades.length });
   return { trades, settlement };
@@ -211,7 +267,7 @@ export function takeoverPrice(w, target) {
 
 export function takeover(w, buyer, target) {
   const price = takeoverPrice(w, target);
-  if (!target.bankrupt) throw new Error('Only bankrupt charters can be taken over');
+  if (!target.bankrupt || target.ownedBy) throw new Error('Only unclaimed bankrupt charters can be taken over');
   if (buyer.gold < price) throw new Error(`Need ${price} gold`);
   buyer.gold -= price;
   for (const g of GOODS) {
@@ -222,4 +278,58 @@ export function takeover(w, buyer, target) {
   target.ownedBy = buyer.id;
   log(w, `${buyer.name} bought ${target.name}'s charter for ${price} gold and absorbed the stall.`, 'takeover');
   return price;
+}
+
+// ---------- season ----------
+export const chartersOwned = (w, m) => 1 + w.merchants.filter(x => x.ownedBy === m.id).length;
+
+export function standings(w) {
+  return w.merchants
+    .map(m => ({ id: m.id, name: m.name, netWorth: Math.round(netWorth(w, m)), charters: chartersOwned(w, m), out: !trading(m), contracts: m.contractsWon || 0 }))
+    .sort((a, b) => (a.out - b.out) || b.netWorth - a.netWorth);
+}
+
+export function checkSeason(w) {
+  if (w.over) return;
+  const me = w.merchants.find(m => m.player);
+  let reason = null;
+  if (me && me.bankrupt) reason = 'bankrupt';
+  else if (me && chartersOwned(w, me) >= 3) reason = 'sovereign';
+  else if (w.day >= SEASON_DAYS) reason = 'season';
+  if (!reason) return;
+  const table = standings(w);
+  const rank = table.findIndex(r => r.id === me?.id) + 1;
+  w.over = true;
+  w.result = { reason, rank, table, day: w.day, win: reason === 'sovereign' || (reason === 'season' && rank === 1) };
+  log(w, reason === 'sovereign' ? `${me.name} now holds three charters and is crowned SOVEREIGN OF THE BAZAAR!` : reason === 'bankrupt' ? 'Your house has fallen. The season is over.' : `The season ends. ${table[0].name} is the richest house in the bazaar.`, 'event');
+}
+
+// ---------- deals (negotiation) ----------
+// Direct goods trade between two merchants at an agreed unit price.
+export function executeDeal(w, buyer, seller, good, qty, price) {
+  if (seller.inventory[good] - reserved(w, seller, good) < qty) throw new Error(`${seller.name} doesn't have ${qty} ${G[good].name} to spare`);
+  const total = Math.round(qty * price);
+  if (buyer.gold < total) throw new Error(`You need ${total} gold`);
+  buyer.gold -= total; seller.gold += total;
+  buyer.cost[good] = (buyer.cost[good] * buyer.inventory[good] + price * qty) / (buyer.inventory[good] + qty);
+  buyer.inventory[good] += qty; seller.inventory[good] -= qty;
+  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price}g each.`, 'deal');
+  return total;
+}
+
+// Buyout of a solvent rival: the buyer pays the price and absorbs the stall (stock and till).
+export function buyoutValue(w, target) {
+  return Math.round(Math.max(60, netWorth(w, target)));
+}
+export function executeBuyout(w, buyer, target, price) {
+  if (!trading(target)) throw new Error(`${target.name} is not trading`);
+  if (buyer.gold < price) throw new Error(`You need ${price} gold`);
+  buyer.gold -= price;
+  buyer.gold += target.gold;
+  for (const g of GOODS) {
+    const q = target.inventory[g.id];
+    if (q) { buyer.cost[g.id] = (buyer.cost[g.id] * buyer.inventory[g.id] + target.cost[g.id] * q) / (buyer.inventory[g.id] + q); buyer.inventory[g.id] += q; target.inventory[g.id] = 0; }
+  }
+  target.gold = 0; target.ownedBy = buyer.id; target.soldFor = price;
+  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} gold and retired from the bazaar.`, 'takeover');
 }

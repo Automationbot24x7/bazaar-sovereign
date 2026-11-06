@@ -4,14 +4,15 @@
 // rules are read from cache and only the persona + market report are new tokens.
 // Falls back to a personality heuristic when no key is set or the API fails.
 import { readFileSync } from 'node:fs';
-import { GOODS, STANCES, EVENTS, RENT, BAZAAR_TAX, netWorth } from './engine.js';
+import { GOODS, STANCES, EVENTS, RENT, BAZAAR_TAX, SEASON_DAYS, netWorth, trading } from './engine.js';
 
 if (!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_KEY_FILE) {
   try { process.env.ANTHROPIC_API_KEY = readFileSync(process.env.ANTHROPIC_KEY_FILE, 'utf8').trim(); } catch (e) { console.warn('Could not read ANTHROPIC_KEY_FILE:', e.message); }
 }
 export const aiOn = () => Boolean(process.env.ANTHROPIC_API_KEY);
 export const DEFAULT_MODEL = process.env.CLAUDE_MODEL || 'claude-haiku-5-5';
-export const MODEL_LABEL = { 'claude-haiku-5-5': 'Haiku 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-opus-5-5': 'Opus 5.5' };
+// Shown in-game as a character trait rather than a product name.
+export const MODEL_LABEL = { 'claude-haiku-5-5': 'Quick mind', 'claude-sonnet-5-5': 'Measured mind', 'claude-opus-5-5': 'Deep mind' };
 
 // Per-model telemetry shown in the UI (and handy to prove caching works).
 export const stats = {};
@@ -33,8 +34,24 @@ const DOCTRINE_TOOL = {
       aggression: { type: 'number', minimum: 0, maximum: 1, description: '0 = timid, 1 = all-in. Scales bid prices, quantities and markups.' },
       bark: { type: 'string', description: 'One short in-character line (max 14 words) shouted in the bazaar for everyone to hear. No hashtags, no emojis, no stage directions.' },
       thought: { type: 'string', description: 'One sentence of private reasoning (never shown to rivals).' },
+      claim_palace_order: { type: 'boolean', description: 'true to claim the open, unclaimed Palace order now (see the codex). Only claim if you can realistically gather the stock before the deadline.' },
     },
     required: ['stance', 'focus', 'aggression', 'bark', 'thought'],
+  },
+};
+
+const OFFER_TOOL = {
+  name: 'respond_to_offer',
+  description: 'Answer a direct offer from the player merchant house, in character.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      accept: { type: 'boolean', description: 'true to accept the offer exactly as made.' },
+      counter_price: { type: ['number', 'null'], description: 'If you reject but would accept a different price, the price you would accept (per unit for goods deals, total for a buyout). null if no counter.' },
+      bark: { type: 'string', description: 'Your spoken reply to the player, max 18 words, in character. No emojis.' },
+      thought: { type: 'string', description: 'One sentence of private reasoning.' },
+    },
+    required: ['accept', 'counter_price', 'bark', 'thought'],
   },
 };
 
@@ -74,20 +91,30 @@ How to read them: a supply shock (drought, monsoon) means the few units that rea
 
 **Aggression** scales how hard the doctrine is pursued: bids, quantities and markups.
 
-## 5. Bankruptcy and takeovers
+## 5. Palace orders
+Every few days the Palace posts an order: a quantity of one good, a deadline, and a reward of roughly two to two-and-a-half times the market value. One merchant may claim an open order (claim_palace_order). Once claimed, that merchant's stock of the good is reserved and cannot be sold at retail; the order is delivered automatically the moment the claimant holds the full quantity, and missing the deadline costs a fine of a quarter of the reward. An unclaimed order goes to whichever merchant first holds the full quantity. Claiming an order and then cornering that good is one of the strongest plays in the game, so rivals race for them.
+
+## 6. Direct offers from the player
+The player can make you two kinds of offer, which you answer with respond_to_offer:
+- **Goods deal**: buy some of your stock at a stated price per unit. Accept if the price beats what you expect to earn selling it yourself (consider market price, upcoming events, your cash needs and your feelings about the player).
+- **Buyout**: buy your whole house (charter, stock and till) for a stated total. If you accept, you retire from the bazaar for good. A fair price is at least your net worth; desperate or weary merchants may accept less, proud ones demand more. Bankrupt merchants cannot be bought out; their charters are seized instead.
+You may counter with a price. Stay in character: haggling is part of the bazaar.
+
+## 7. Bankruptcy and takeovers
 A bankrupt house's charter can be bought by a solvent rival. The buyer pays the takeover price (about half the stock value, minus debts) and absorbs all the bankrupt house's stock. If the player doesn't buy within three days, the richest rival with enough gold usually does. Taking over a fallen rival is a strong move; going bankrupt ends your story.
 
-## 6. How to think
+## 8. How to think
 - Read the rumor first. It is the most valuable information in the report.
 - Check rivals' doctrines: if someone is already cornering a good, fighting them for it often bankrupts both. If two rivals are undercutting each other, a premium or hoard stance can wait them out.
 - Watch your own gold. Below ~80 gold you cannot win auctions; below ~40 consider liquidating.
 - Don't change doctrine every turn without reason; consistency compounds. But react decisively to rumors.
 - Price trends in the report are the change over the last five days.
+- A season lasts ${SEASON_DAYS} days; the richest house at the end wins, and any house holding three charters wins at once.
 
-## 7. Voice
+## 9. Voice
 Your "bark" is heard by the whole bazaar: vivid, short, in character, never more than 14 words. Taunts, boasts, sales pitches and laments are all welcome. Never mention game mechanics, numbers like "aggression 0.8", the codex, or that you are an AI. Your "thought" is private, one sentence, plain reasoning.`;
 
-const ALWAYS_TOOL = '\n\nRespond ONLY by calling the set_doctrine tool exactly once. Do not write any other text.';
+const ALWAYS_TOOL = '\n\nRespond ONLY by calling the tool named in the request exactly once. Do not write any other text.';
 const system = role => [
   { type: 'text', text: CODEX, cache_control: { type: 'ephemeral' } }, // shared cached prefix
   { type: 'text', text: role + ALWAYS_TOOL },
@@ -100,6 +127,8 @@ function snapshot(w, me) {
     trend5d: Object.fromEntries(GOODS.map(g => { const h = w.history[g.id]; return [g.id, +(h.at(-1) - (h.at(-6) ?? h[0])).toFixed(2)]; })),
     activeEvents: w.active.map(e => `${e.text} (${e.left}d left)`),
     rumor: w.pending ? w.pending.rumor : null,
+    seasonDaysLeft: SEASON_DAYS - w.day,
+    palaceOrders: w.contracts.filter(c => c.status === 'open').map(c => ({ id: c.id, good: c.good, qty: c.qty, reward: c.reward, dueDay: c.due, claimedBy: c.takenBy ? (w.merchants.find(m => m.id === c.takenBy)?.name) : null })),
     me: { gold: me.gold, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine },
     rivals: w.merchants.filter(m => m !== me).map(m => ({
       name: m.name, bankrupt: m.bankrupt, doctrine: m.doctrine.stance + (m.doctrine.focus ? `:${m.doctrine.focus}` : ''),
@@ -108,14 +137,14 @@ function snapshot(w, me) {
   };
 }
 
-async function callClaude(model, role, user) {
+async function callClaude(model, role, user, tool = DOCTRINE_TOOL) {
   const t0 = Date.now();
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model, max_tokens: 1200, system: system(role),
-      tools: [DOCTRINE_TOOL], tool_choice: { type: 'auto' }, // Sonnet/Opus 5.5 don't allow forced tool_choice
+      tools: [DOCTRINE_TOOL, OFFER_TOOL], tool_choice: { type: 'auto' }, // Sonnet/Opus 5.5 don't allow forced tool_choice
       messages: [{ role: 'user', content: user }],
     }),
   });
@@ -123,8 +152,8 @@ async function callClaude(model, role, user) {
   const j = await r.json();
   const ms = Date.now() - t0;
   track(model, ms, j.usage);
-  const out = j.content.find(c => c.type === 'tool_use')?.input;
-  if (!out) throw new Error('Claude returned no doctrine');
+  const out = j.content.find(c => c.type === 'tool_use' && c.name === tool.name)?.input;
+  if (!out) throw new Error(`Claude returned no ${tool.name}`);
   return { out, ms, usage: j.usage };
 }
 
@@ -139,11 +168,11 @@ function clean(d) {
 // ---------- NPC turn ----------
 export async function think(w, m) {
   const model = m.model || DEFAULT_MODEL;
-  if (aiOn()) {
+  if (aiOn() && !m._offline) {
     const role = `## Your role\nYou are **${m.name}**. Personality: ${m.persona}\nPlay to win as this character would. Decide with the set_doctrine tool.`;
     try {
-      const { out: d, ms, usage } = await callClaude(model, role, `Market report (day ${w.day}):\n${JSON.stringify(snapshot(w, m))}`);
-      return { ...clean(d), bark: String(d.bark || '').slice(0, 120) || m.bark, thought: String(d.thought || '').slice(0, 220), engine: 'claude', model, ms, cached: usage?.cache_read_input_tokens || 0 };
+      const { out: d, ms, usage } = await callClaude(model, role, `Call set_doctrine. Market report (day ${w.day}):\n${JSON.stringify(snapshot(w, m))}`);
+      return { ...clean(d), bark: String(d.bark || '').slice(0, 120) || m.bark, thought: String(d.thought || '').slice(0, 220), claim: !!d.claim_palace_order, engine: 'claude', model, ms, cached: usage?.cache_read_input_tokens || 0 };
     } catch (e) { console.warn(`Claude unavailable for ${m.name} (${model}), using fallback: ${e.message.slice(0, 80)}`); }
   }
   return { ...heuristic(w, m), engine: 'heuristic', model: null, ms: 0 };
@@ -152,10 +181,10 @@ export async function think(w, m) {
 // ---------- Player's natural-language orders -> doctrine ----------
 export async function interpretOrder(w, me, order) {
   const model = process.env.FACTOR_MODEL || 'claude-haiku-5-5';
-  if (aiOn()) {
+  if (aiOn() && !me._offline) {
     const role = `## Your role\nYou are the loyal factor (head clerk) of the player's merchant house. Translate the owner's order into a doctrine with set_doctrine. If the order is vague, choose the doctrine that best serves it given the market report. "bark" is your short reply to the owner (max 14 words, deferential and in character, e.g. "At once — every pinch of saffron in town will be ours."). "thought" explains the plan in one sentence, mentioning any risk the owner should know.`;
     try {
-      const { out: d, ms } = await callClaude(model, role, `Owner's order: "${order}"\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, me))}`);
+      const { out: d, ms } = await callClaude(model, role, `Call set_doctrine. Owner's order: "${order}"\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, me))}`);
       return { ...clean(d), bark: d.bark, thought: d.thought, engine: 'claude', model, ms };
     } catch (e) { console.warn(`Claude unavailable for order, using fallback: ${e.message.slice(0, 80)}`); }
   }
@@ -180,3 +209,27 @@ function heuristic(w, m) {
 }
 
 export const codexTokensApprox = Math.round(CODEX.length / 4);
+
+// ---------- a rival answers the player's offer ----------
+// offer: { kind: 'goods', good, qty, price } | { kind: 'buyout', price }
+export async function answerOffer(w, rival, player, offer) {
+  const model = rival.model || DEFAULT_MODEL;
+  const value = Math.round(netWorth(w, rival));
+  const desc = offer.kind === 'buyout'
+    ? `${player.name} offers to buy your entire house (charter, stock and till) for ${offer.price} gold in total. Your net worth is about ${value} gold. If you accept you retire from the bazaar for good.`
+    : `${player.name} offers to buy ${offer.qty} ${offer.good} from you at ${offer.price} gold each (${Math.round(offer.qty * offer.price)} total). The market price is ${w.prices[offer.good]}.`;
+  if (aiOn() && !rival._offline) {
+    const role = `## Your role\nYou are **${rival.name}**. Personality: ${rival.persona}\nA rival house has made you a direct offer. Answer it in character with respond_to_offer.`;
+    try {
+      const { out: d, ms } = await callClaude(model, role, `Call respond_to_offer. Offer: ${desc}\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, rival))}`, OFFER_TOOL);
+      return { accept: !!d.accept, counter: Number.isFinite(d.counter_price) ? Math.round(d.counter_price * 100) / 100 : null, bark: String(d.bark || '').slice(0, 160), thought: String(d.thought || '').slice(0, 220), ms, engine: 'claude' };
+    } catch (e) { console.warn(`Claude unavailable for offer to ${rival.name}: ${e.message.slice(0, 80)}`); }
+  }
+  // fallback: rational haggler
+  if (offer.kind === 'buyout') {
+    const ask = Math.round(value * (rival.gold < 60 ? 0.8 : 1.25));
+    return offer.price >= ask ? { accept: true, counter: null, bark: 'Done. May the bazaar treat you as it treated me.', thought: 'Fair price.' } : { accept: false, counter: ask, bark: `My house is worth ${ask} gold, not a copper less.`, thought: 'Too low.' };
+  }
+  const fair = +(w.prices[offer.good] * 1.1).toFixed(2);
+  return offer.price >= fair ? { accept: true, counter: null, bark: 'A fair price. Take it before I change my mind.', thought: 'Above market.' } : { accept: false, counter: fair, bark: `For ${fair} each, it is yours.`, thought: 'Below market.' };
+}

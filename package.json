@@ -1,7 +1,7 @@
 {
   "name": "bazaar-sovereign",
   "version": "1.0.0",
-  "description": "A living bazaar where every merchant is an NFT that owns its own NEAR wallet, and Claude runs the rivals.",
+  "description": "A living bazaar where every merchant is an NFT that owns its own NEAR wallet, and AI minds run the rivals.",
   "type": "module",
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js"
