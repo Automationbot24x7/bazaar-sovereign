@@ -181,13 +181,18 @@ function snapshot(w, me) {
   };
 }
 
+// Anthropic directly, or an Anthropic-compatible gateway (e.g. SandBase) when AI_BASE_URL is set.
+// Gateways name models like "anthropic/claude-haiku-5.5"; set AI_MODEL_STYLE=gateway for that.
+const API_BASE = (process.env.AI_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '').replace(/\/v1$/, '');
+const apiModel = m => process.env.AI_MODEL_STYLE === 'gateway' ? `anthropic/${m.replace(/-(\d+)-(\d+)$/, '-$1.$2')}` : m;
+
 async function callClaude(model, role, user, tool = DOCTRINE_TOOL) {
   const t0 = Date.now();
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+  const r = await fetch(`${API_BASE}/v1/messages`, {
     method: 'POST',
     headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
-      model, max_tokens: 1200, system: system(role),
+      model: apiModel(model), max_tokens: 1200, system: system(role),
       tools: [DOCTRINE_TOOL, OFFER_TOOL, CRY_TOOL], tool_choice: { type: 'auto' }, // Sonnet/Opus 5.5 don't allow forced tool_choice
       messages: [{ role: 'user', content: user }],
     }),
