@@ -2,10 +2,10 @@
 // One "day" = wholesale auction -> retail clearing -> costs -> bankruptcies.
 
 export const GOODS = [
-  { id: 'saffron', name: 'Saffron', icon: '🌼', base: 40, supply: 14, demand: 16, storage: 0.6, spoil: 0 },
-  { id: 'silk', name: 'Silk', icon: '🧵', base: 26, supply: 18, demand: 18, storage: 0.4, spoil: 0 },
-  { id: 'tea', name: 'Tea', icon: '🍃', base: 12, supply: 30, demand: 30, storage: 0.2, spoil: 0.06 },
-  { id: 'salt', name: 'Salt', icon: '🧂', base: 6, supply: 40, demand: 38, storage: 0.05, spoil: 0 },
+  { id: 'saffron', name: 'Saffron', unit: 'pouch', units: 'pouches', icon: '🌼', base: 40, supply: 14, demand: 16, storage: 0.6, spoil: 0 },
+  { id: 'silk', name: 'Silk', unit: 'bolt', units: 'bolts', icon: '🧵', base: 26, supply: 18, demand: 18, storage: 0.4, spoil: 0 },
+  { id: 'tea', name: 'Tea', unit: 'sack', units: 'sacks', icon: '🍃', base: 12, supply: 30, demand: 30, storage: 0.2, spoil: 0.06 },
+  { id: 'salt', name: 'Salt', unit: 'block', units: 'blocks', icon: '🧂', base: 6, supply: 40, demand: 38, storage: 0.05, spoil: 0 },
 ];
 const G = Object.fromEntries(GOODS.map(g => [g.id, g]));
 
@@ -27,7 +27,7 @@ function rng(seed) {
 }
 
 export const RENT = 18;
-export const SEASON_DAYS = 30;
+export const SEASON_DAYS = 24;
 export const BAZAAR_TAX = 0.08; // the Vizier takes a cut of every retail sale
 
 export function createWorld({ seed = 7, merchants }) {
@@ -86,31 +86,31 @@ function palace(w) {
     if (m) {
       m.inventory[c.good] -= c.qty; m.gold += c.reward - (c.takenBy === m.id ? c.advance || 0 : 0); m.contractsWon = (m.contractsWon || 0) + 1;
       c.status = 'delivered'; c.deliveredBy = m.id;
-      log(w, `${m.name} delivered ${c.qty} ${G[c.good].name} to the Palace and was paid ${c.reward} gold!`, 'palace');
+      log(w, `${m.name} delivered ${c.qty} ${G[c.good].name} to the Palace and was paid ${c.reward} dirhams!`, 'palace');
       if (!m.player) m.bark = 'The Palace pays in gold, and I deliver in full.';
     } else if (w.day > c.due && c.takenBy && trading(w.merchants.find(x => x.id === c.takenBy)) && w.merchants.find(x => x.id === c.takenBy).inventory[c.good] >= Math.ceil(c.qty / 2)) {
       // partial delivery: at least half the order earns a pro-rated reward (minus the advance)
       const t = w.merchants.find(x => x.id === c.takenBy), q = t.inventory[c.good], pay = Math.round((c.reward * q) / c.qty * 0.7);
       t.inventory[c.good] -= q; t.gold += pay - (c.advance || 0); t.contractsWon = (t.contractsWon || 0) + 1;
       c.status = 'delivered'; c.deliveredBy = t.id; c.partial = q;
-      log(w, `${t.name} delivered ${q} of ${c.qty} ${G[c.good].name} late and short; the Palace paid ${pay} gold.`, 'palace');
+      log(w, `${t.name} delivered ${q} of ${c.qty} ${G[c.good].name} late and short; the Palace paid ${pay} dirhams.`, 'palace');
     } else if (w.day > c.due) {
       c.status = 'failed';
       if (c.takenBy) {
         const t = w.merchants.find(x => x.id === c.takenBy), fine = Math.min(60, Math.round(c.reward * 0.06));
         t.gold -= (c.advance || 0) + fine;
-        log(w, `${t.name} failed the Palace order: the ${c.advance || 0}g advance is clawed back and a ${fine}g fine is due.`, 'bankrupt');
+        log(w, `${t.name} failed the Palace order: the ${c.advance || 0}-dirham advance is clawed back and a ${fine}-dirham fine is due.`, 'bankrupt');
       } else log(w, `The Palace order for ${G[c.good].name} went unfilled.`, 'info');
     }
   }
   // a new order roughly every 6 days (first on day 3), at most one open at a time
-  if (!w.over && !w.contracts.some(c => c.status === 'open') && (w.day === 3 || (w.day > 3 && w.rand() < 0.18))) {
+  if (!w.over && !w.contracts.some(c => c.status === 'open') && (w.day === 2 || (w.day > 3 && w.rand() < 0.2))) {
     const g = GOODS[Math.floor(w.rand() * GOODS.length)];
     // sized so a healthy house can actually fund it (about 450 gold of stock at wholesale)
     const qty = Math.max(6, Math.round(Math.min(g.supply * (1 + w.rand() * 0.6), 450 / (g.base * 0.65))));
     const c = { id: `PO-${w.day}`, good: g.id, qty, reward: Math.round(qty * g.base * (1.6 + w.rand() * 0.4)), due: w.day + 5, takenBy: null, status: 'open', posted: w.day };
     w.contracts.unshift(c);
-    log(w, `The Palace wants ${qty} ${g.name} by day ${c.due}, paying ${c.reward} gold.`, 'palace');
+    log(w, `The Palace wants ${qty} ${g.name} by day ${c.due}, paying ${c.reward} dirhams.`, 'palace');
   }
   w.contracts.length = Math.min(w.contracts.length, 12);
 }
@@ -122,7 +122,7 @@ export function acceptContract(w, m, id) {
   c.takenBy = m.id;
   c.advance = Math.round(c.reward * 0.15); // the Palace pays an advance so the taker can buy stock
   m.gold += c.advance;
-  log(w, `${m.name} claimed the Palace order for ${c.qty} ${G[c.good].name} and received a ${c.advance}g advance.`, 'palace');
+  log(w, `${m.name} claimed the Palace order for ${c.qty} ${G[c.good].name} and received a ${c.advance}-dirham advance.`, 'palace');
   return c;
 }
 
@@ -175,7 +175,14 @@ export function step(w) {
     log(w, `${w.pending.text}!`, 'event');
     w.pending = null;
   }
-  if (w.rand() < 0.22 && !w.active.length) {
+  // scripted opening: the very first day brings a rumor of a shortage, so a new player
+  // gets a meaningful decision in the first seconds; after that, rumors are random
+  if (w.day === 1 && !w.pending) {
+    const first = w.rand() < 0.5 ? 'drought' : 'monsoon';
+    const e = EVENTS.find(x => x.id === first);
+    w.pending = e;
+    log(w, `Rumor: ${e.rumor}`, 'rumor');
+  } else if (w.rand() < 0.22 && !w.active.length) {
     const e = EVENTS[Math.floor(w.rand() * EVENTS.length)];
     w.pending = e;
     log(w, `Rumor: ${e.rumor}`, 'rumor');
@@ -299,7 +306,7 @@ export function takeover(w, buyer, target) {
   const price = takeoverPrice(w, target);
   if (!target.bankrupt || target.ownedBy) throw new Error('Only unclaimed bankrupt charters can be taken over');
   const capital = Math.round(Math.max(80, price * 0.6)); // the new owner reopens the stall with working capital
-  if (buyer.gold < price + capital) throw new Error(`You need ${Math.round(price + capital)} gold (${price} for the charter, ${capital} to reopen the stall)`);
+  if (buyer.gold < price + capital) throw new Error(`You need ${Math.round(price + capital)} dirhams (${price} for the charter, ${capital} to reopen the stall)`);
   buyer.gold -= price + capital;
   target.gold = capital; target.bankrupt = false; target.ownedBy = buyer.id; target.vassalSince = w.day;
   log(w, `${buyer.name} seized ${target.name}'s charter. The stall reopens as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
@@ -335,11 +342,11 @@ export function checkSeason(w) {
 export function executeDeal(w, buyer, seller, good, qty, price) {
   if (seller.inventory[good] - reserved(w, seller, good) < qty) throw new Error(`${seller.name} doesn't have ${qty} ${G[good].name} to spare`);
   const total = Math.round(qty * price);
-  if (buyer.gold < total) throw new Error(`You need ${total} gold`);
+  if (buyer.gold < total) throw new Error(`You need ${total} dirhams`);
   buyer.gold -= total; seller.gold += total;
   buyer.cost[good] = (buyer.cost[good] * buyer.inventory[good] + price * qty) / (buyer.inventory[good] + qty);
   buyer.inventory[good] += qty; seller.inventory[good] -= qty;
-  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price}g each.`, 'deal');
+  log(w, `${buyer.name} bought ${qty} ${G[good].name} from ${seller.name} at ${price} dirhams each.`, 'deal');
   return total;
 }
 
@@ -349,11 +356,11 @@ export function buyoutValue(w, target) {
 }
 export function executeBuyout(w, buyer, target, price) {
   if (!trading(target)) throw new Error(`${target.name} is not trading`);
-  if (buyer.gold < price) throw new Error(`You need ${price} gold`);
+  if (buyer.gold < price) throw new Error(`You need ${price} dirhams`);
   if (target.ownedBy) throw new Error(`${target.name} already serves another house`);
   buyer.gold -= price;
   target.ownedBy = buyer.id; target.soldFor = price; target.vassalSince = w.day;
-  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} gold. The stall now trades as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
+  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} dirhams. The stall now trades as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
 }
 
 // ---------- back-room deals between rivals ----------

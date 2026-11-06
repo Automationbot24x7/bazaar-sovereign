@@ -11,10 +11,13 @@ const STANCE_HINT = {
   liquidate: 'Dump stock for cash. Use when you’re about to go under.',
 };
 const FEED_ICON = { mint: '📜', wallet: '👛', transfer: '↩', goods: '⚖', update: '✎', settle: '🪙', deal: '🤝', pay: '🪙', listed: '🏷', takeover: '♛', loan: '🏦', error: '⚠' };
-const SPEEDS = [1400, 650, 300];
+const SPEEDS = [2500, 1200, 600];
+const dh = n => `${Math.round(n).toLocaleString()} dirhams`;
 let S = null, speedIdx = 0, prevBarks = {}, dealWith = null;
 
 const goodName = id => S.goods.find(g => g.id === id)?.name || id;
+const unitsOf = id => S.goods.find(g => g.id === id)?.units || 'units';
+const unitOf = id => S.goods.find(g => g.id === id)?.unit || 'unit';
 const merchant = id => S.merchants.find(m => m.id === id);
 
 // ---------- render ----------
@@ -26,15 +29,15 @@ function stalls() {
       <div class="portrait" style="background-image:url(/art/${m.art}.webp)"></div>
       <div>
         <h3>${esc(m.name)}${m.charters > 1 ? ` <span class="crowns" title="Charters held">${'♛'.repeat(m.charters)}</span>` : ''}${!m.player && m.mood ? ` <span class="mood ${m.mood.key}" title="Attitude toward you">${m.mood.label}</span>` : ''}</h3>
-        <div class="nw">${m.netWorth.toLocaleString()}<small>g net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
+        <div class="nw">${m.netWorth.toLocaleString()}<small> dh net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}" title="Profit or loss yesterday">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
         <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>
         ${S.ai === 'live' && m.modelLabel && !m.vassal ? `<span class="brain" title="${esc(m.player ? 'Your factor' : m.name)} — ${esc(m.modelLabel)}${m.thinkMs ? `, last decision took ${(m.thinkMs / 1000).toFixed(1)}s` : ''}">${m.thinking ? '<i class="dots"></i>' : '✦'} ${esc(m.modelLabel)}${m.thinkMs ? ` · ${(m.thinkMs / 1000).toFixed(1)}s` : ''}</span>` : ''}
       </div>
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>Charter NFT</span>${m.walletUrl ? `<a href="${m.walletUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="This stall's own NEAR wallet">${esc(m.wallet)} ↗</a>` : `<span title="This stall's own wallet">${esc(m.wallet || '')}</span>`}</div>
-      ${m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${m.takeoverPrice}g</button>` : ''}
+      ${m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}
       ${owner ? `<div class="owned">♛ Vassal of ${owner.player ? 'your house' : esc(owner.name)} · pays ${owner.player ? 'you' : 'them'} 20% of its profit</div>` : ''}
-      ${m.tribute ? `<div class="owned">Vassals have paid ${m.player ? 'you' : 'this house'} ${m.tribute.toLocaleString()}g</div>` : ''}
+      ${m.tribute ? `<div class="owned">Vassals have paid ${m.player ? 'you' : 'this house'} ${dh(m.tribute)}</div>` : ''}
     </article>`;
   }).join('');
   for (const m of S.merchants) {
@@ -51,8 +54,8 @@ function palace() {
   if (!c) { el.innerHTML = `<b>Palace order ${recent.status === 'delivered' ? `filled by ${esc(recent.deliveredByName)}` : 'closed'}</b>`; return; }
   const left = c.due - S.day, mine = c.takenBy === 'you';
   el.innerHTML = `<img src="/art/${c.good}.webp" alt="" />
-    <div><b>Palace order</b> · ${c.qty} ${goodName(c.good)} by day ${c.due} <span class="muted">(${left}d left)</span><br/>
-    <span class="reward">${c.reward.toLocaleString()} gold</span>
+    <div><b>Palace order</b> · ${c.qty} ${unitsOf(c.good)} of ${goodName(c.good).toLowerCase()} by day ${c.due} <span class="muted">(${left}d left)</span><br/>
+    <span class="reward">${dh(c.reward)}</span>
     ${c.takenBy ? `<span class="claimed">${mine ? 'Yours' : 'Claimed by ' + esc(c.takenByName)}${c.progress != null ? ` · ${c.progress}/${c.qty}` : ''}</span><div class="bar"><i style="width:${Math.min(100, (c.progress / c.qty) * 100)}%"></i></div>` : ''}</div>
     ${!c.takenBy && !S.over ? `<button class="primary" id="claim" data-id="${c.id}">Claim it</button>` : ''}`;
 }
@@ -81,13 +84,13 @@ function goods() {
   }
   for (const g of S.goods) {
     const card = el.querySelector(`[data-g="${g.id}"]`), h = g.history, prev = h.at(-6) ?? h[0], ch = ((g.price - prev) / prev) * 100;
-    card.querySelector('.p').textContent = `${g.price.toFixed(1)}g`;
+    card.querySelector('.p').innerHTML = `${g.price.toFixed(1)} <small>dh / ${g.unit}</small>`;
     const d = card.querySelector('.d'); d.textContent = `${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(0)}%`; d.className = 'd ' + (ch >= 0 ? 'pnl up' : 'pnl down');
     spark(card.querySelector('canvas'), h, ch >= 0 ? '#6cc483' : '#e0614a');
     const total = S.merchants.reduce((t, m) => t + m.inventory[g.id], 0) || 1;
     card.querySelector('.share').innerHTML = S.merchants.filter(m => m.inventory[g.id]).map(m => `<i style="width:${(m.inventory[g.id] / total) * 100}%;background:${m.color}" title="${esc(m.name)}: ${m.inventory[g.id]}"></i>`).join('');
     const me = S.merchants.find(m => m.player), top = [...S.merchants].sort((a, b) => b.inventory[g.id] - a.inventory[g.id])[0];
-    card.querySelector('.meta').innerHTML = `<span>You hold <b>${me.inventory[g.id]}</b></span><span>${top.inventory[g.id] ? `${esc(top.name)} holds ${Math.round((top.inventory[g.id] / total) * 100)}%` : 'no stock in town'}</span>`;
+    card.querySelector('.meta').innerHTML = `<span>You hold <b>${me.inventory[g.id]}</b> ${g.units}</span><span>${top.inventory[g.id] ? `${esc(top.name)} holds ${Math.round((top.inventory[g.id] / total) * 100)}%` : 'no stock in town'}</span>`;
   }
 }
 
@@ -102,7 +105,7 @@ function race() {
     c.beginPath(); d.forEach((v, i) => { const x = (i / Math.max(d.length - 1, 1)) * w, y = h - 6 - ((v - min) / (max - min)) * (h - 12); i ? c.lineTo(x, y) : c.moveTo(x, y); });
     c.strokeStyle = m.color; c.lineWidth = m.player ? 3 : 1.6; c.globalAlpha = m.trading ? 1 : 0.35; c.stroke(); c.globalAlpha = 1;
   }
-  $('#legend').innerHTML = S.standings.map((r, i) => `<span><i style="background:${merchant(r.id).color}"></i>${i + 1}. ${esc(r.name)} ${r.netWorth.toLocaleString()}g</span>`).join('');
+  $('#legend').innerHTML = S.standings.map((r, i) => `<span><i style="background:${merchant(r.id).color}"></i>${i + 1}. ${esc(r.name)} ${r.netWorth.toLocaleString()} dh</span>`).join('');
 }
 
 function feeds() {
@@ -122,11 +125,13 @@ function header() {
   $('#play').textContent = S.over ? '🏁 Season over' : S.running ? '⏸ Pause' : '▶ Open the bazaar';
   $('#play').disabled = S.over; $('#sim').disabled = S.over;
   const me = S.merchants.find(m => m.player);
-  $('#houseCharter').textContent = `· ${me.gold.toLocaleString()}g in the till`;
+  $('#houseCharter').textContent = `· ${dh(me.gold)} in the till`;
   document.querySelectorAll('#stances button').forEach(btn => btn.classList.toggle('on', btn.dataset.s === me.doctrine.stance));
   if (document.activeElement !== $('#focus')) $('#focus').value = me.doctrine.focus || '';
   if (document.activeElement !== $('#aggr')) $('#aggr').value = me.doctrine.aggression;
   $('#stanceHint').textContent = STANCE_HINT[me.doctrine.stance];
+  decision();
+  coach();
   const b = $('#tableBanner');
   b.hidden = false;
   if (S.table === 'live') { b.className = 'table-banner live'; b.innerHTML = `● <b>Live table.</b> Your game is settling on NEAR testnet — every charter, wallet, sack of goods and payment below is a real transaction. <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">See the contract ↗</a>`; }
@@ -142,10 +147,33 @@ function end() {
   const r = S.result;
   $('#endTitle').textContent = r.reason === 'sovereign' ? '♛ Sovereign of the Bazaar ♛' : r.reason === 'bankrupt' ? 'Your house has fallen' : r.win ? 'Richest house in the bazaar!' : 'The season ends';
   $('#endText').textContent = r.reason === 'sovereign' ? `You hold three merchant charters on day ${r.day}. The bazaar is yours.` : r.reason === 'bankrupt' ? 'Your gold ran out. Rivals circle your charter.' : `You finished #${r.rank} of ${r.table.length} after ${r.day} days.`;
-  $('#endTable').innerHTML = '<tr><th>#</th><th>House</th><th>Net worth</th><th>Charters</th><th>Palace orders</th></tr>' + r.table.map((t, i) => `<tr class="${t.id === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${esc(t.name)}${t.vassalOf ? ` <span class="muted">(vassal of ${esc(merchant(t.vassalOf).name)})</span>` : t.out ? ' <span class="muted">(bankrupt)</span>' : ''}</td><td>${t.netWorth.toLocaleString()}g</td><td>${'♛'.repeat(t.charters)}</td><td>${t.contracts}</td></tr>`).join('');
+  $('#endTable').innerHTML = '<tr><th>#</th><th>House</th><th>Net worth</th><th>Charters</th><th>Palace orders</th></tr>' + r.table.map((t, i) => `<tr class="${t.id === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${esc(t.name)}${t.vassalOf ? ` <span class="muted">(vassal of ${esc(merchant(t.vassalOf).name)})</span>` : t.out ? ' <span class="muted">(bankrupt)</span>' : ''}</td><td>${dh(t.netWorth)}</td><td>${'♛'.repeat(t.charters)}</td><td>${t.contracts}</td></tr>`).join('');
   $('#endProof').innerHTML = S.chain.mode === 'testnet' ? `The final state is settling on NEAR testnet — <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">see the charters ↗</a>` : '';
   $('#end').showModal();
 }
+
+// ---------- key-moment decisions ----------
+function decision() {
+  const d = S.decision, el = $('#decision');
+  el.hidden = !d;
+  if (!d) return;
+  el.className = `decision ${d.kind}`;
+  el.innerHTML = `<div class="dt">${esc(d.title)} <span class="muted">· day ${d.day}, the bazaar waits for you</span></div><p>${esc(d.text)}</p><div class="da">${d.actions.map((a, i) => `<button class="${i === 0 ? 'primary' : 'ghost'}" data-i="${i}">${esc(a.label)}</button>`).join('')}</div>`;
+}
+
+// ---------- coach: one gentle nudge at a time, never twice ----------
+const seen = (() => { try { return JSON.parse(localStorage.getItem('bs-coach') || '{}'); } catch { return {}; } })();
+function mark(k) { if (seen[k]) return; seen[k] = 1; try { localStorage.setItem('bs-coach', JSON.stringify(seen)); } catch {} }
+function coach() {
+  const el = $('#coach'); let tip = null;
+  if (S.over || S.decision) tip = null;
+  else if (!S.running && S.day === 0) tip = 'Press ▶ Open the bazaar to start the first day.';
+  else if (!seen.haggled && S.day >= 4) tip = 'Tap any rival’s stall to haggle: buy their stock, or offer to buy their whole house.';
+  else if (!seen.rivals && S.day >= 9) tip = 'Rivals learn as the season goes on. Open “Rivals” to see their moods and lessons.';
+  else if (!seen.ordered && S.day >= 12) tip = 'You can also give your factor plain-English orders, like “sell everything before the caravan arrives”.';
+  el.hidden = !tip; if (tip) el.innerHTML = `💡 ${tip} <button class="ghost" id="coachOk">Got it</button>`;
+}
+$('#coach').onclick = e => { if (e.target.id === 'coachOk') { const k = !seen.haggled && S.day >= 4 ? 'haggled' : !seen.rivals && S.day >= 9 ? 'rivals' : 'ordered'; mark(k); coach(); } };
 
 // ---------- who's who ----------
 function rivals() {
@@ -166,13 +194,15 @@ const refresh = () => api('/api/state').then(render).catch(() => {});
 // ---------- deal drawer ----------
 function dealMeta() {
   const m = merchant(dealWith);
-  $('#dealMeta').innerHTML = `${m.mood ? `<span class="mood ${m.mood.key}">${m.mood.label}</span> · ` : ''}${m.netWorth.toLocaleString()}g net · stock: ${Object.entries(m.inventory).filter(([, q]) => q).map(([g, q]) => `${q} ${goodName(g)}`).join(', ') || 'none'}`;
-  $('#bHint').textContent = `Their house is worth about ${m.buyoutHint?.toLocaleString()}g. You have ${S.me.gold.toLocaleString()}g.`;
+  $('#dealMeta').innerHTML = `${m.mood ? `<span class="mood ${m.mood.key}">${m.mood.label}</span> · ` : ''}${dh(m.netWorth)} net · stock: ${Object.entries(m.inventory).filter(([, q]) => q).map(([g, q]) => `${q} ${q === 1 ? unitOf(g) : unitsOf(g)} of ${goodName(g).toLowerCase()}`).join(', ') || 'none'}`;
+  $('#bHint').textContent = `Their house is worth about ${dh(m.buyoutHint || 0)}. You have ${dh(S.me.gold)}.`;
   const q = Number($('#dQty').value), p = Number($('#dPrice').value);
-  $('#dTotal').textContent = q && p ? `Total ${(q * p).toFixed(0)}g · market price ${S.goods.find(g => g.id === $('#dGood').value).price.toFixed(1)}g · you have ${S.me.gold.toLocaleString()}g` : '';
+  const gd = S.goods.find(g => g.id === $('#dGood').value);
+  $('#dTotal').textContent = q && p ? `Total ${dh(q * p)} · market ${gd.price.toFixed(1)} a ${gd.unit} · you have ${dh(S.me.gold)}` : '';
 }
 function openDeal(id) {
   dealWith = id;
+  mark('haggled');
   const m = merchant(id);
   $('#dealName').textContent = m.name;
   $('#dealPortrait').style.backgroundImage = `url(/art/${m.art}.webp)`;
@@ -182,6 +212,7 @@ function openDeal(id) {
   $('#dQty').value = Math.max(1, Math.min(10, best?.[1] || 5));
   $('#dPrice').value = S.goods.find(g => g.id === $('#dGood').value).price.toFixed(1);
   $('#bPrice').value = m.buyoutHint;
+  $('#dGood').title = '';
   $('#dealReply').hidden = true;
   dealMeta();
   $('#deal').showModal();
@@ -200,8 +231,10 @@ async function offer(body, btn) {
     const rep = r.reply;
     $('#dealReply').hidden = false;
     $('#dealReply').className = 'deal-reply ' + (rep.accept ? 'yes' : 'no');
-    $('#dealReply').innerHTML = `<b>${rep.accept ? 'Deal!' : 'Refused.'}</b> “${esc(rep.bark)}”${!rep.accept && rep.counter ? `<button type="button" class="ghost" id="meet">Meet ${rep.counter}${body.kind === 'buyout' ? 'g' : 'g each'}</button>` : ''}`;
-    if (!rep.accept && rep.counter) $('#meet').onclick = () => { if (body.kind === 'buyout') { $('#bPrice').value = rep.counter; offer({ kind: 'buyout', price: rep.counter }, $('#dealBuyout button')); } else { $('#dPrice').value = rep.counter; offer({ ...body, price: rep.counter }, $('#dealGoods button')); } };
+    const cq = rep.counterQty && body.kind === 'goods' ? rep.counterQty : body.qty;
+    const meetLabel = body.kind === 'buyout' ? `Pay ${dh(rep.counter)}` : `Take ${cq} at ${rep.counter} each${cq !== body.qty ? ' (their bulk deal)' : ''}`;
+    $('#dealReply').innerHTML = `<b>${rep.accept ? 'Deal!' : 'Refused.'}</b> “${esc(rep.bark)}”${!rep.accept && rep.counter ? `<button type="button" class="ghost" id="meet">${meetLabel}</button>` : ''}`;
+    if (!rep.accept && rep.counter) $('#meet').onclick = () => { if (body.kind === 'buyout') { $('#bPrice').value = rep.counter; offer({ kind: 'buyout', price: rep.counter }, $('#dealBuyout button')); } else { $('#dPrice').value = rep.counter; $('#dQty').value = cq; offer({ ...body, qty: cq, price: rep.counter }, $('#dealGoods button')); } };
     if (rep.accept && body.kind === 'buyout') setTimeout(() => $('#deal').close(), 2500);
   } catch (e) {
     $('#dealReply').hidden = false; $('#dealReply').className = 'deal-reply no'; $('#dealReply').textContent = e.message;
@@ -219,10 +252,12 @@ $('#focus').onchange = e => setDoctrine({ focus: e.target.value || null });
 $('#aggr').onchange = e => setDoctrine({ aggression: Number(e.target.value) });
 $('#play').onclick = () => api(S.running ? '/api/pause' : '/api/play', {}).then(render);
 $('#speed').onclick = () => { speedIdx = (speedIdx + 1) % SPEEDS.length; $('#speed').textContent = ['1×', '2×', '4×'][speedIdx]; api('/api/speed', { ms: SPEEDS[speedIdx] }).then(render); };
+$('#autoPause').onchange = e => api('/api/autopause', { on: e.target.checked }).then(render);
+$('#decision').onclick = e => { const i = e.target.dataset.i; if (i != null) { mark('decided'); api('/api/decide', { index: Number(i) }).then(render).catch(err => { alert(err.message); refresh(); }); } };
 $('#sim').onclick = async e => { const b = e.currentTarget; b.disabled = true; b.textContent = '⏩ …'; const poll = setInterval(refresh, 300); await api('/api/simulate', { days: 10 }).then(render).catch(err => alert(err.message)); clearInterval(poll); b.disabled = S?.over; b.textContent = '⏩ 10 days'; };
 $('#reset').onclick = () => confirm('Start a new season?') && api('/api/reset', {}).then(s => { endShown = false; render(s); });
 $('#again').onclick = () => api('/api/reset', {}).then(s => { $('#end').close(); endShown = false; render(s); });
-$('#help').onclick = () => { rivals(); $('#rivals').showModal(); };
+$('#help').onclick = () => { mark('rivals'); rivals(); $('#rivals').showModal(); };
 $('#stalls').onclick = e => {
   const t = e.target.closest('[data-target]')?.dataset.target;
   if (t) { api('/api/takeover', { target: t }).then(render).catch(err => alert(err.message)); return; }
@@ -236,6 +271,7 @@ $('#orderForm').onsubmit = async e => {
   const order = $('#order').value.trim(); if (!order) return;
   const btn = $('#orderBtn'); btn.disabled = true; btn.textContent = '…';
   try {
+    mark('ordered');
     const r = await api('/api/order', { order });
     render(r);
     $('#reply').hidden = false;

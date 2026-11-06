@@ -60,7 +60,7 @@ let liveHolder = null; // id of the game that holds the live testnet table
 class Game {
   constructor(id, live, seed) {
     this.id = id; this.live = live; this.lastSeen = Date.now();
-    this.running = false; this.speedMs = 1400; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
+    this.running = false; this.speedMs = 2500; this.autoPause = true; this.decision = null; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
     this.chain = makeChain(live);
     this.reset(seed);
   }
@@ -118,6 +118,7 @@ class Game {
     const w = this.world;
     if (w.over) { this.pause(); return; }
     const hadRumor = w.pending, openBefore = w.contracts.filter(c => c.status === 'open' && !c.takenBy).length;
+    const bankruptBefore = new Set(w.merchants.filter(m => m.bankrupt).map(m => m.id));
     const { settlement } = step(w);
     for (const r of settlement) this.pnlBuffer[r.merchant] = (this.pnlBuffer[r.merchant] || 0) + r.pnl;
     for (const d of backroomDeals(w, m => m.relation || 0)) {
@@ -140,7 +141,29 @@ class Game {
       }
     }
     if (w.day % SETTLE_EVERY === 0 || w.over) this.flush();
-    if (w.over) this.pause();
+    if (w.over) { this.pause(); return; }
+
+    // key moments pause the game and offer one-click decisions
+    const me = this.me(), G = Object.fromEntries(GOODS.map(g => [g.id, g]));
+    const newRumor = !hadRumor && w.pending;
+    const newOrder = openNow > openBefore && w.contracts.find(c => c.status === 'open' && !c.takenBy);
+    const fallen = w.merchants.find(m => m.bankrupt && !m.ownedBy && !bankruptBefore.has(m.id) && !m.player);
+    let d = null;
+    if (fallen) {
+      d = { kind: 'bankrupt', title: `${fallen.name} is bankrupt!`, text: `Their charter can be seized for ${takeoverPrice(w, fallen)} dirhams (plus working capital to reopen it). If you don't, a rival will within three days.`, actions: [{ label: 'Seize the charter', act: 'takeover', target: fallen.id }, { label: 'Let it go', act: 'resume' }] };
+    } else if (newOrder) {
+      const g = G[newOrder.good];
+      d = { kind: 'palace', title: 'The Palace wants goods', text: `${newOrder.qty} ${g.units} of ${g.name.toLowerCase()} by day ${newOrder.due}, paying ${newOrder.reward} dirhams (a ${Math.round(newOrder.reward * 0.15)}-dirham advance when you claim it). Rivals will race you for it.`, actions: [{ label: 'Claim it', act: 'claim', id: newOrder.id }, { label: 'Leave it', act: 'resume' }] };
+    } else if (newRumor) {
+      const e = w.pending, short = Object.entries(e.supply || {}).find(([, v]) => v < 1), glut = Object.entries(e.supply || {}).find(([, v]) => v > 1);
+      const actions = short ? [{ label: `Corner ${G[short[0]].name.toLowerCase()}`, act: 'doctrine', doctrine: { stance: 'corner', focus: short[0], aggression: 0.8 } }]
+        : e.demand ? [{ label: 'Hoard stock for the feast', act: 'doctrine', doctrine: { stance: 'hoard', focus: null, aggression: 0.7 } }]
+        : glut ? [{ label: `Sell ${G[glut[0]].name.toLowerCase()} now`, act: 'doctrine', doctrine: { stance: 'liquidate', focus: null, aggression: 0.5 } }]
+        : [{ label: 'Keep a cash cushion', act: 'doctrine', doctrine: { stance: 'premium', focus: null, aggression: 0.4 } }];
+      const hint = short ? `${G[short[0]].name} will be scarce tomorrow. Whoever holds it sets the price.` : e.demand ? 'A feast is coming: prices will rise across the board.' : glut ? `A flood of ${G[glut[0]].name.toLowerCase()} is coming: prices will crash.` : 'Rents are about to double. Thin margins will hurt.';
+      d = { kind: 'rumor', title: 'A rumor in the bazaar', text: `“${e.rumor}” ${hint}`, actions: [...actions, { label: 'Ignore it', act: 'resume' }] };
+    }
+    if (d && this.autoPause && this.running) { this.decision = { ...d, day: w.day }; this.pause(); }
   }
   flush() {
     const w = this.world;
@@ -154,13 +177,13 @@ class Game {
     this.tick();
     this.timer = setTimeout(() => this.loop(), this.speedMs);
   }
-  play() { if (this.world.over) return; this.running = true; this.loop(); }
+  play() { if (this.world.over) return; this.decision = null; this.running = true; this.loop(); }
   pause() { this.running = false; clearTimeout(this.timer); }
 
   view() {
     const w = this.world, me = this.me();
     return {
-      day: w.day, seasonDays: SEASON_DAYS, running: this.running, speedMs: this.speedMs, ai: aiOn() ? 'live' : 'heuristic',
+      day: w.day, seasonDays: SEASON_DAYS, running: this.running, decision: this.decision, autoPause: this.autoPause, speedMs: this.speedMs, ai: aiOn() ? 'live' : 'heuristic',
       table: this.live ? 'live' : 'practice', liveBusy: !this.live && testnetAvailable && !!liveHolder,
       chain: this.chain.info(),
       goods: GOODS.map(g => ({ ...g, price: w.prices[g.id], history: w.history[g.id].slice(-60) })),
@@ -226,20 +249,21 @@ async function makeOffer(g, b) {
   if (b.kind === 'buyout') {
     offer = { kind: 'buyout', price: Math.round(Number(b.price)) };
     if (!(offer.price > 0)) throw new Error('Name a price');
-    if (offer.price > me.gold) throw new Error(`You only have ${Math.round(me.gold)} gold`);
+    if (offer.price > me.gold) throw new Error(`You only have ${Math.round(me.gold)} dirhams`);
   } else {
     offer = { kind: 'goods', good: b.good, qty: Math.round(Number(b.qty)), price: Math.round(Number(b.price) * 100) / 100 };
     if (!GOODS.some(x => x.id === offer.good) || !(offer.qty > 0) || !(offer.price > 0)) throw new Error('Choose a good, quantity and price');
     if (rival.inventory[offer.good] < offer.qty) throw new Error(`${rival.name} only holds ${rival.inventory[offer.good]} ${offer.good}`);
-    if (offer.qty * offer.price > me.gold) throw new Error(`That costs ${Math.round(offer.qty * offer.price)} gold; you have ${Math.round(me.gold)}`);
+    if (offer.qty * offer.price > me.gold) throw new Error(`That costs ${Math.round(offer.qty * offer.price)} dirhams; you have ${Math.round(me.gold)}`);
   }
   // a merchant keeps their word: meeting their last counter-offer closes the deal
   g.counters ||= {};
   const key = `${rival.id}:${offer.kind}:${offer.good || ''}`, prior = g.counters[key];
-  const reply = prior && offer.price >= prior.price && (offer.kind === 'buyout' || offer.qty <= prior.qty)
+  // a bulk counter ("take 20 at 22") is honoured for at least that many; a normal one for at most that many
+  const reply = prior && offer.price >= prior.price && (offer.kind === 'buyout' || (prior.bulk ? offer.qty >= prior.qty : offer.qty <= prior.qty))
     ? { accept: true, counter: null, bark: 'A deal is a deal. The bazaar remembers who keeps their word.', thought: 'Met my own counter.', engine: 'rule' }
     : await withAiSlot(() => answerOffer(w, rival, me, offer), () => answerOffer(w, { ...rival, _offline: true }, me, offer));
-  if (!reply.accept && reply.counter) g.counters[key] = { price: reply.counter, qty: offer.qty || 0 };
+  if (!reply.accept && reply.counter) g.counters[key] = { price: reply.counter, qty: reply.counterQty || offer.qty || 0, bulk: (reply.counterQty || 0) > (offer.qty || 0) };
   // how you treat them shapes their attitude toward you
   const fair = offer.kind === 'buyout' ? buyoutValue(w, rival) : w.prices[offer.good] * offer.qty;
   const asked = offer.kind === 'buyout' ? offer.price : offer.price * offer.qty;
@@ -257,7 +281,7 @@ async function makeOffer(g, b) {
       g.chain.recordDeal(me, rival, offer.good, offer.qty, total, w.merchants);
     }
   } else {
-    log(w, `${rival.name} turned down your ${offer.kind === 'buyout' ? 'buyout' : 'offer'}${reply.counter ? ` (would take ${reply.counter}${offer.kind === 'buyout' ? ' gold' : 'g each'})` : ''}.`, 'deal');
+    log(w, `${rival.name} turned down your ${offer.kind === 'buyout' ? 'buyout' : 'offer'}${reply.counter ? ` (would take ${reply.counter}${offer.kind === 'buyout' ? ' dirhams' : ` dirhams each${reply.counterQty && reply.counterQty !== offer.qty ? ` for ${reply.counterQty}` : ''}`})` : ''}.`, 'deal');
   }
   return { ...g.view(), reply: { ...reply, offer, rival: rival.name } };
 }
@@ -281,7 +305,19 @@ http.createServer(async (req, res) => {
       switch (p) {
         case '/api/play': g.play(); return send(res, 200, g.view());
         case '/api/pause': g.pause(); return send(res, 200, g.view());
-        case '/api/speed': g.speedMs = Math.max(250, Math.min(4000, Number(b.ms) || 1400)); return send(res, 200, g.view());
+        case '/api/speed': g.speedMs = Math.max(400, Math.min(5000, Number(b.ms) || 2500)); return send(res, 200, g.view());
+        case '/api/autopause': g.autoPause = !!b.on; return send(res, 200, g.view());
+        case '/api/decide': {
+          const a = g.decision?.actions?.[Number(b.index)];
+          if (!a) return send(res, 400, { error: 'Nothing to decide' });
+          try {
+            if (a.act === 'doctrine') me.doctrine = { ...a.doctrine };
+            if (a.act === 'claim') { acceptContract(w, me, a.id); me.doctrine = { stance: 'corner', focus: w.contracts.find(c => c.id === a.id).good, aggression: Math.max(0.7, me.doctrine.aggression) }; }
+            if (a.act === 'takeover') { const t = w.merchants.find(m => m.id === a.target); const price = takeover(w, me, t); g.chain.recordCharterSale(me, t, price, 'bankruptcy seizure'); t.bark = 'A new master, a fresh start. I will not fail you.'; checkSeason(w); }
+          } catch (e) { g.decision = null; return send(res, 400, { error: e.message }); }
+          g.play();
+          return send(res, 200, g.view());
+        }
         case '/api/simulate': {
           const days = Math.min(15, Number(b.days) || 10);
           g.pause();

@@ -27,6 +27,7 @@
     <div class="controls">
       <button id="play" class="primary">▶ Open the bazaar</button>
       <button id="speed" class="ghost" title="Speed">1×</button>
+      <label class="ap" title="Pause at rumors, Palace orders and bankruptcies"><input type="checkbox" id="autoPause" checked /> pause at key moments</label>
       <button id="sim" class="ghost" title="Skip ahead 10 days">⏩ 10 days</button>
       <button id="help" class="ghost" title="Who is who in the bazaar">Rivals</button>
       <button id="reset" class="ghost" title="New season">↺</button>
@@ -34,10 +35,12 @@
   </header>
 
   <div id="tableBanner" class="table-banner" hidden></div>
+  <div id="coach" class="coach" hidden></div>
 
   <section class="stage">
     <div class="rumor" id="rumor" hidden></div>
     <div class="palace" id="palace" hidden></div>
+    <div class="decision" id="decision" hidden></div>
     <div class="stalls" id="stalls"></div>
   </section>
 
@@ -95,13 +98,13 @@
     <form id="dealGoods" class="deal-form">
       <label>Good <select id="dGood"></select></label>
       <label>Quantity <input id="dQty" type="number" min="1" step="1" value="5" /></label>
-      <label>Price each <input id="dPrice" type="number" min="0.1" step="0.1" /></label>
+      <label>Price each (dirhams) <input id="dPrice" type="number" min="0.1" step="0.1" /></label>
       <div class="muted" id="dTotal"></div>
       <button class="primary">Make the offer</button>
     </form>
     <form id="dealBuyout" class="deal-form" hidden>
       <p class="muted">If they accept, they retire: their charter NFT, stock and till become yours. Hold three charters to be crowned Sovereign.</p>
-      <label>Total price <input id="bPrice" type="number" min="1" step="1" /></label>
+      <label>Total price (dirhams) <input id="bPrice" type="number" min="1" step="1" /></label>
       <div class="muted" id="bHint"></div>
       <button class="primary">Offer to buy them out</button>
     </form>
@@ -110,14 +113,14 @@
 
   <dialog id="intro">
     <h2>Welcome to the bazaar</h2>
-    <p>You inherit a merchant charter: an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you for 30 days.</p>
+    <p>You inherit a merchant charter: an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you for 24 days. Money is counted in silver dirhams.</p>
     <ul>
       <li><b>Rumors</b> warn of droughts, caravans and festivals a day early. Corner a market before it moves.</li>
       <li><b>Palace orders</b> pay double. Claim one, then buy up the good to deliver it.</li>
       <li><b>Haggle</b>: tap a rival to buy their stock or offer to buy out their whole house.</li>
       <li>Rivals who run out of gold go <b>bankrupt</b>. Seize their charter, or buy out a rival outright, and their stall becomes your <b>vassal</b>: it keeps trading under your strategy and pays you 20% of its profit.</li>
     </ul>
-    <p><b>Win:</b> be the richest house (vassals included) on day 30 — or hold <b>three charters</b> and be crowned Sovereign at once.</p>
+    <p><b>Win:</b> be the richest house (vassals included) on day 24 — or hold <b>three charters</b> and be crowned Sovereign at once.</p>
     <p class="muted">Every 5 days profits, stock and charters settle on NEAR. You never need a wallet to play.</p>
     <form method="dialog"><button class="primary">Enter the bazaar</button></form>
   </dialog>

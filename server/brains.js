@@ -48,20 +48,22 @@ const OFFER_TOOL = {
     properties: {
       accept: { type: 'boolean', description: 'true to accept the offer exactly as made.' },
       counter_price: { type: ['number', 'null'], description: 'If you reject but would accept a different price, the price you would accept (per unit for goods deals, total for a buyout). null if no counter.' },
+      counter_qty: { type: ['integer', 'null'], description: 'Goods deals only: optionally propose a different quantity with your counter, e.g. a bulk deal ("take 20 and I will do 22 each") to move stock, or fewer if you cannot spare that many. null to keep their quantity.' },
       bark: { type: 'string', description: 'Your spoken reply to the player, max 18 words, in character. No emojis.' },
       thought: { type: 'string', description: 'One sentence of private reasoning.' },
     },
-    required: ['accept', 'counter_price', 'bark', 'thought'],
+    required: ['accept', 'counter_price', 'counter_qty', 'bark', 'thought'],
   },
 };
 
 // ---------- The Bazaar Codex: long, static, cached ----------
 const pct = x => `${Math.round(x * 100)}%`;
 const CODEX = `# THE BAZAAR CODEX
+Money in the bazaar is counted in silver dirhams (the report calls the amount 'gold' for historical reasons; always say 'dirhams' when speaking). Goods are sold by the pouch (saffron), bolt (silk), sack (tea) and block (salt).
 You are playing a merchant in "Bazaar Sovereign", a trading game set in a desert-city bazaar. Five merchant houses compete: four rivals and the player's house. Every merchant house is a charter (an NFT on the NEAR blockchain) that owns its own wallet. Read this codex carefully; it is the complete rulebook. Each turn you receive a market report and must choose your doctrine with the set_doctrine tool.
 
 ## 1. Goods
-${GOODS.map(g => `- **${g.name}** (id \`${g.id}\`): base price ${g.base} gold. Daily supply ≈ ${g.supply} units, daily town demand ≈ ${g.demand} units at fair prices. Storage costs ${g.storage} gold per unit per day.${g.spoil ? ` Spoils: loses ${pct(g.spoil)} of stock every day.` : ' Does not spoil.'}`).join('\n')}
+${GOODS.map(g => `- **${g.name}** (id \`${g.id}\`): base price ${g.base} dirhams a ${g.unit}. Daily supply ≈ ${g.supply} units, daily town demand ≈ ${g.demand} units at fair prices. Storage costs ${g.storage} dirhams per ${g.unit} per day.${g.spoil ? ` Spoils: loses ${pct(g.spoil)} of stock every day.` : ' Does not spoil.'}`).join('\n')}
 
 Saffron is scarce and valuable; silk is a luxury; tea is cheap but perishable; salt is cheap, plentiful and safe to store.
 
@@ -96,7 +98,7 @@ Every few days the Palace posts an order: a quantity of one good, a deadline, an
 
 ## 6. Direct offers from the player
 The player can make you two kinds of offer, which you answer with respond_to_offer:
-- **Goods deal**: buy some of your stock at a stated price per unit. Accept if the price beats what you expect to earn selling it yourself (consider market price, upcoming events, your cash needs and your feelings about the player).
+- **Goods deal**: buy some of your stock at a stated price per unit. Accept if the price beats what you expect to earn selling it yourself (consider market price, upcoming events, your cash needs and your feelings about the player). When countering you may propose a bulk deal (a bigger quantity at a slightly lower price) if you want to move stock before prices fall, but only when it genuinely suits you.
 - **Buyout**: buy your whole house (charter, stock and till) for a stated total. If you accept, you retire from the bazaar for good. A fair price is at least your net worth; desperate or weary merchants may accept less, proud ones demand more. Bankrupt merchants cannot be bought out; their charters are seized instead.
 You may counter with a price. Stay in character: haggling is part of the bazaar.
 
@@ -235,7 +237,7 @@ export async function answerOffer(w, rival, player, offer) {
     const role = `## Your role\nYou are **${rival.name}**. Personality: ${rival.persona}\nA rival house has made you a direct offer. Answer it in character with respond_to_offer.`;
     try {
       const { out: d, ms } = await callClaude(model, role, `Call respond_to_offer. Offer: ${desc}${history}\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, rival))}`, OFFER_TOOL);
-      return { accept: !!d.accept, counter: Number.isFinite(d.counter_price) ? Math.round(d.counter_price * 100) / 100 : null, bark: String(d.bark || '').slice(0, 160), thought: String(d.thought || '').slice(0, 220), ms, engine: 'claude' };
+      return { accept: !!d.accept, counter: Number.isFinite(d.counter_price) ? Math.round(d.counter_price * 100) / 100 : null, counterQty: Number.isInteger(d.counter_qty) && d.counter_qty > 0 && offer.kind === 'goods' ? Math.min(d.counter_qty, rival.inventory[offer.good]) : null, bark: String(d.bark || '').slice(0, 160), thought: String(d.thought || '').slice(0, 220), ms, engine: 'claude' };
     } catch (e) { console.warn(`Claude unavailable for offer to ${rival.name}: ${e.message.slice(0, 80)}`); }
   }
   // fallback: rational haggler
