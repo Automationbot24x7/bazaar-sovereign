@@ -239,6 +239,26 @@ export function makeChain(live, table = 0) {
         }));
     },
 
+    // Moneylenders' Guild: a bond is paid out by the treasury; a repayment (with fees and interest) goes back to it
+    recordGuild(m, kind, amount) {
+      const who = m.player ? 'You' : m.name, s = m.player ? '' : 's';
+      const text = kind === 'borrow'
+        ? `${who} borrow${s} ${Math.round(amount)} coins (${fmtNear(amount)} NEAR) from the Moneylenders' Guild, paid out by the treasury.`
+        : `${who} repay${s} the Guild ${Math.round(amount)} coins (${fmtNear(amount)} NEAR), fees and interest included.`;
+      if (!live) { push('loan', text, mockHash()); return; }
+      const [from, to] = kind === 'borrow' ? [TREASURY, m.wallet] : [m.wallet, TREASURY];
+      enqueue(from, `guild ${kind}`, async () => {
+        if (kind === 'repay') await ensureFunds(m, amount);
+        push('loan', text, hashOf(await send(from, to, yocto(amount))));
+      });
+    },
+
+    // stock destroyed (rats): the Vizier burns it from the holder's on-chain balance
+    recordLoss(m, good, text) {
+      if (!live) { push('goods', text, mockHash()); return; }
+      enqueue(ROOT, 'stock loss', async () => push('goods', text, hashOf(await call(ROOT, 'sync_goods', { holdings: [{ account_id: m.wallet, token_id: good, amount: String(Math.max(0, Math.floor(m.inventory[good]))) }] }))));
+    },
+
     // charter sale: Vizier lists it, then the buyer's own wallet buys it with the price attached
     recordCharterSale(buyer, target, price, reason) {
       const text = `${buyer.player ? 'You buy' : buyer.name + ' buys'} ${target.name}'s charter for ${Math.round(price)} coins (${fmtNear(price)} NEAR). The NFT moves to the buyer's stall.`;

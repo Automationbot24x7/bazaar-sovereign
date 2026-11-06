@@ -15,6 +15,8 @@ Players never see a wallet popup. The chain is underneath the game loop, not in 
 | **Merchant charter** | A NEP-171 NFT on our contract (`contract/`). Metadata `extra` holds the live business: wallet, net worth, gold, stance, day, bankrupt, takeovers, absorbed charters. |
 | **Merchant wallet** | Each charter has its own NEAR sub-account (e.g. `kasim.<vizier>.testnet`) funded with working capital — *the NFT owns money*. |
 | **Profit & loss** | Every 5 game days, each merchant's P&L settles as a real NEAR transfer between the town treasury and the merchant's wallet (1 coin = 0.00002 NEAR). |
+| **Guild loans** | A Moneylenders' Guild bond is paid out by the town treasury to the borrower's wallet; the repayment, with its fee and daily interest, goes back wallet-to-treasury. |
+| **Rats** | When a rival's rats ruin stock in a warehouse, the Vizier burns those goods tokens from the wallet. |
 | **Dynamic NFT** | `update_charters` rewrites every charter's metadata with that day's net worth / stance / bankruptcy, emitting `EVENT_JSON` logs. |
 | **Goods** | Saffron, silk, tea and salt are NEP-245 multi-tokens held by the merchant wallets; the Vizier mirrors market buying and selling with `sync_goods`. |
 | **Deals between houses** | Atomic, through the contract's escrow: the seller's wallet locks the goods for one named buyer at a fixed price (`offer_goods`), then the buyer's wallet attaches the NEAR and receives the goods in the same transaction (`accept_goods`). Neither side can be left holding only half a deal. |
@@ -53,6 +55,7 @@ Runs fully offline in **mock chain** mode by default. To run against **NEAR test
 ```bash
 NEAR_ACCOUNT_ID=<you>.testnet          # key read from ~/.near-credentials/testnet/<you>.testnet.json
 ANTHROPIC_API_KEY=sk-ant-...           # optional: Claude rivals (or ANTHROPIC_KEY_FILE=path)
+AI_DAILY_USD=25                        # optional: daily AI spend cap; past it rivals use their offline minds
 LIVE_TABLES=3                          # optional: how many games can play on-chain at once (default 3)
 node tools/deploy.mjs                  # one-time: creates bazaar.<you>.testnet and deploys the contract
 npm start
@@ -83,6 +86,9 @@ npm start
 Build & test (Linux/WSL): `bash contract/build.sh` → `contract/out/bazaar_charters.wasm`. Twelve unit tests cover minting, updates and takeovers, oracle-only access, wallet-signed goods transfers, charter purchases, the escrow (atomic deal, wrong buyer, underpayment, cancel) and the v2 → v3 migration. Deploy or upgrade with `node --env-file=.env tools/deploy.mjs`.
 
 ## How the economy works
+
+**Mid-season threats.** On day 6 the Magnate Baltazar (a fictional outsider with deep pockets) opens a stall selling two of the four goods below his own cost. He stays only while it pays: every losing day, and every unit a house buys off his carts (8 a day, delivered overnight), wears down his patience, and when it runs out he leaves. You can buy off his carts, rally rivals into a pact (each answers in character; some refuse or want a fee), trade the goods he ignores, or borrow from the Moneylenders' Guild to outlast him (150-coin bonds, 5% fee plus 3% a day; debt counts against net worth). Rivals you have insulted may hire the rat-catcher against your warehouse; the rumor comes a day early, and a 25-coin night watch or a fair deal stops it.
+
 
 Each day: rumor → event; suppliers auction stock (highest bid first, reserve price); townsfolk buy from the cheapest stall (with a slice of loyal regulars per stall); rent, storage, spoilage and an 8% bazaar tax; fire-sale then bankruptcy if gold < 0. Rich NPCs buy bankrupt charters if you don't within 3 days. See `server/engine.js`.
 

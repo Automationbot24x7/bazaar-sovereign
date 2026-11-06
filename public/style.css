@@ -173,3 +173,21 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 .chips { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
 .chip { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--muted); animation: pop .3s ease-out; }
 .chip.bad { background: #3a1b14; color: #ffb4a3; } .chip.good { background: #173525; color: #a9e5bb; } .chip.warn { background: #3a300f; color: #ffd978; }
+
+/* ---------- v4: the Magnate, the Guild, rats ---------- */
+.magnate { padding: 10px 20px; background: linear-gradient(90deg, #3a130d, #2a1a10); border-bottom: 1px solid #a3402c; font-size: 13px; display: grid; gap: 6px; }
+.magnate.coming, .magnate.gone { display: block; background: #2b2118; border-bottom-color: var(--line); color: var(--parch); }
+.magnate.gouging { background: linear-gradient(90deg, #3a2a0d, #2a1a10); border-bottom-color: var(--gold); }
+.magnate b { color: var(--gold); }
+.magnate .mh { font-size: 14px; }
+.magnate .patience { display: flex; gap: 10px; align-items: center; }
+.magnate .patience .bar { flex: 0 1 320px; height: 10px; background: #1a0f0b; border: 1px solid #a3402c; border-radius: 6px; overflow: hidden; }
+.magnate .patience .bar i { display: block; height: 100%; background: linear-gradient(90deg, #e0614a, #f0bd45); transition: width .5s; }
+.magnate .mrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.magnate .ally { color: var(--green); } .magnate .no { color: var(--muted); text-decoration: line-through; }
+.magnate .hits { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.hit { color: var(--red); font-style: normal; font-weight: 700; }
+.guild { display: inline-flex; gap: 6px; align-items: center; color: var(--parch); }
+button.danger { border-color: var(--red); color: #ffcfbf; }
+.feed li.magnate { color: #ffb38f; } .feed li.guild { color: var(--blue); }
+.decision.magnate { border-color: #a3402c; }

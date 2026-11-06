@@ -3,13 +3,27 @@
 // static "Bazaar Codex" system block marked for prompt caching, so after the first call the
 // rules are read from cache and only the persona + market report are new tokens.
 // Falls back to a personality heuristic when no key is set or the API fails.
-import { readFileSync } from 'node:fs';
-import { GOODS, STANCES, EVENTS, RENT, BAZAAR_TAX, SEASON_DAYS, netWorth, trading } from './engine.js';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { GOODS, STANCES, EVENTS, RENT, BAZAAR_TAX, SEASON_DAYS, MAGNATE, GUILD, WATCH_COST, netWorth, trading, debtOf, magnatePrice } from './engine.js';
 
 if (!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_KEY_FILE) {
   try { process.env.ANTHROPIC_API_KEY = readFileSync(process.env.ANTHROPIC_KEY_FILE, 'utf8').trim(); } catch (e) { console.warn('Could not read ANTHROPIC_KEY_FILE:', e.message); }
 }
-export const aiOn = () => Boolean(process.env.ANTHROPIC_API_KEY);
+// ---------- daily spend cap: past it, rivals think with their free heuristic minds until tomorrow (UTC) ----------
+const PRICE = { 'claude-haiku-5-5': [0.10, 0.50], 'claude-sonnet-5-5': [2, 10], 'claude-opus-5-5': [4, 20] }; // $ per 1M tokens in / out
+const DAILY_USD = Number(process.env.AI_DAILY_USD || 25);
+const SPEND_FILE = process.env.AI_SPEND_FILE || '.ai-spend.json';
+const today = () => new Date().toISOString().slice(0, 10);
+export const spend = (() => { try { return JSON.parse(readFileSync(SPEND_FILE, 'utf8')); } catch { return { day: today(), usd: 0 }; } })();
+function charge(model, u = {}) {
+  const [inp, out] = PRICE[model] || PRICE['claude-opus-5-5'];
+  const usd = ((u.input_tokens || 0) * inp + (u.cache_creation_input_tokens || 0) * inp * 1.25 + (u.cache_read_input_tokens || 0) * inp * 0.1 + (u.output_tokens || 0) * out) / 1e6;
+  if (spend.day !== today()) { spend.day = today(); spend.usd = 0; }
+  spend.usd = +(spend.usd + usd).toFixed(5);
+  try { writeFileSync(SPEND_FILE, JSON.stringify(spend)); } catch {}
+}
+const underBudget = () => spend.day !== today() || spend.usd < DAILY_USD;
+export const aiOn = () => Boolean(process.env.ANTHROPIC_API_KEY) && underBudget();
 export const DEFAULT_MODEL = process.env.CLAUDE_MODEL || 'claude-haiku-5-5';
 // Shown in-game as a character trait rather than a product name.
 export const MODEL_LABEL = { 'claude-haiku-5-5': 'Quick mind', 'claude-sonnet-5-5': 'Measured mind', 'claude-opus-5-5': 'Deep mind' };
@@ -96,6 +110,11 @@ How to read them: a supply shock (drought, monsoon) means the few units that rea
 ## 4b. Staff and weather
 Each stall can serve about 22 customers a day; every hired helper adds 14 more for 22 coins a day. Helpers only pay off when crowds are big, at festivals. Sudden storms come without warning: stalls without an awning (a one-time 120 coins) lose about 12% of their stock, and shoppers stay home that day.
 
+## 4c. The Magnate, the Guild and the rat-catcher
+- **The Magnate** (${MAGNATE.title}) arrives on day ${MAGNATE.arriveDay}, picks the two goods with the fattest margins and sells them at about half their base price, below his own cost, to steal every customer. He stays only while it is worth it to him: each losing day wears down his patience, and when he has lost about ${MAGNATE.patience} coins he packs up and leaves. Every unit a house buys off his carts (at most ${MAGNATE.raidCap} per house per day, delivered overnight) is a loss for him, so buying from him bleeds him faster and stocks your warehouse cheaply for when he is gone. If the houses abandon his goods, or two houses go bankrupt, he owns those markets and raises his prices to about 1.6x base until someone undercuts him. The player may propose a pact: allies buy off his carts every day until he leaves.
+- **The Moneylenders' Guild** lends fixed bonds of ${GUILD.bond} coins (at most ${GUILD.maxBonds} at a time): a ${Math.round(GUILD.fee * 100)}% fee plus ${Math.round(GUILD.daily * 100)}% a day until repaid. Debt counts against your net worth; a bankrupt borrower's remaining stock is seized.
+- **The rat-catcher**: a merchant who resents a rival can pay to let rats into their warehouse, ruining a quarter of their most valuable perishable stock. Rumors warn of it a day ahead; a night watch (${WATCH_COST} coins) stops it.
+
 ## 5. Palace orders
 Every few days the Palace posts an order: a quantity of one good, a deadline, and a reward of roughly two to two-and-a-half times the market value. One merchant may claim an open order (claim_palace_order). Once claimed, that merchant's stock of the good is reserved and cannot be sold at retail; the order is delivered automatically the moment the claimant holds the full quantity, and missing the deadline costs a fine of a quarter of the reward. An unclaimed order goes to whichever merchant first holds the full quantity. Claiming an order and then cornering that good is one of the strongest plays in the game, so rivals race for them.
 
@@ -134,9 +153,10 @@ function snapshot(w, me) {
     trend5d: Object.fromEntries(GOODS.map(g => { const h = w.history[g.id]; return [g.id, +(h.at(-1) - (h.at(-6) ?? h[0])).toFixed(2)]; })),
     activeEvents: w.active.map(e => `${e.text} (${e.left}d left)`),
     rumor: w.pending ? w.pending.rumor : null,
+    magnate: w.magnate?.stage && w.magnate.stage !== 'coming' ? { stage: w.magnate.stage, goods: w.magnate.goods, price: Object.fromEntries((w.magnate.goods || []).map(g => [g, magnatePrice(w, g)])), lossSoFar: Math.round(w.magnate.loss || 0), patience: MAGNATE.patience, pactWithPlayer: (w.magnate.allies || []).map(id => w.merchants.find(m => m.id === id)?.name) } : w.magnate ? 'rumored to arrive tomorrow' : null,
     seasonDaysLeft: SEASON_DAYS - w.day,
     palaceOrders: w.contracts.filter(c => c.status === 'open').map(c => ({ id: c.id, good: c.good, qty: c.qty, reward: c.reward, dueDay: c.due, claimedBy: c.takenBy ? (w.merchants.find(m => m.id === c.takenBy)?.name) : null })),
-    me: { gold: me.gold, helpers: me.helpers || 0, awning: !!me.awning, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine, lessonsFromThisSeason: me.lessons || [], attitudeToPlayer: me.player ? undefined : (me.relation || 0) },
+    me: { gold: me.gold, guildDebt: debtOf(w, me), helpers: me.helpers || 0, awning: !!me.awning, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine, lessonsFromThisSeason: me.lessons || [], attitudeToPlayer: me.player ? undefined : (me.relation || 0) },
     rivals: w.merchants.filter(m => m !== me).map(m => ({
       name: m.name, bankrupt: m.bankrupt, doctrine: m.doctrine.stance + (m.doctrine.focus ? `:${m.doctrine.focus}` : ''),
       netWorth: Math.round(netWorth(w, m)), stock: m.inventory, lastAsk: m.lastAsk, lastBark: m.bark,
@@ -159,6 +179,7 @@ async function callClaude(model, role, user, tool = DOCTRINE_TOOL) {
   const j = await r.json();
   const ms = Date.now() - t0;
   track(model, ms, j.usage);
+  charge(model, j.usage);
   const out = j.content.find(c => c.type === 'tool_use' && c.name === tool.name)?.input;
   if (!out) throw new Error(`Claude returned no ${tool.name}`);
   return { out, ms, usage: j.usage };
@@ -250,4 +271,29 @@ export async function answerOffer(w, rival, player, offer) {
   }
   const fair = +(w.prices[offer.good] * 1.1).toFixed(2);
   return offer.price >= fair ? { accept: true, counter: null, bark: 'A fair price. Take it before I change my mind.', thought: 'Above market.' } : { accept: false, counter: fair, bark: `For ${fair} each, it is yours.`, thought: 'Below market.' };
+}
+
+
+// ---------- a rival answers the player's pact against the Magnate ----------
+export async function answerPact(w, rival, player) {
+  const model = rival.model || DEFAULT_MODEL, mg = w.magnate;
+  const goods = mg.goods.join(' and ');
+  const desc = `${player.name} proposes a pact against ${MAGNATE.title}, who is selling ${goods} below cost to drive the houses out. Allies buy off his carts every day (up to ${MAGNATE.raidCap} units at about half the base price), which costs you coins now but stocks your warehouse cheaply and makes him lose patience and leave sooner. Joining ties your house to the player's. He has lost ${Math.round(mg.loss)} of the ~${MAGNATE.patience} coins he will swallow. Your attitude to the player is ${rival.relation || 0} (-3 hostile to +3 friendly). Accept, refuse, or name a fee in coins (counter_price) that the player must pay you to join.`;
+  if (aiOn() && !rival._offline) {
+    const role = `## Your role\nYou are **${rival.name}**. Personality: ${rival.persona}\nAnswer the player's proposal in character with respond_to_offer (counter_qty: null).`;
+    try {
+      const { out: d, ms } = await callClaude(model, role, `Call respond_to_offer. Proposal: ${desc}\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, rival))}`, OFFER_TOOL);
+      return { accept: !!d.accept, counter: Number.isFinite(d.counter_price) && d.counter_price > 0 ? Math.round(d.counter_price) : null, bark: String(d.bark || '').slice(0, 160), thought: String(d.thought || '').slice(0, 220), ms, engine: 'claude' };
+    } catch (e) { console.warn(`Claude unavailable for pact with ${rival.name}: ${e.message.slice(0, 80)}`); }
+  }
+  // fallback: temperament, grudges and whether the Magnate is hurting their own trade
+  const t = (rival.persona || '').toLowerCase(), rel = rival.relation || 0;
+  const hurt = mg.goods.some(g => t.includes(g) || rival.inventory[g] >= 5 || rival.doctrine.focus === g);
+  if (rel <= -2) return { accept: false, counter: null, bark: `Stand with you? I would sooner kiss ${MAGNATE.name}'s rings.`, engine: 'heuristic' };
+  if (rival.gold < 60) return { accept: false, counter: null, bark: 'My till is empty. Fight him with your own coin.', engine: 'heuristic' };
+  if (/greedy|schem/.test(t)) return hurt && rel >= 1 ? { accept: true, counter: null, bark: 'Together, then. He bleeds; we feast after.', engine: 'heuristic' } : { accept: false, counter: 40, bark: 'A pact has a price. Forty coins, and my carts are yours.', engine: 'heuristic' };
+  if (/cheap|undercut|reckless/.test(t)) return { accept: true, counter: null, bark: 'Ha! Nobody out-cheaps Kasim. Let us empty his carts!', engine: 'heuristic' };
+  if (/hates debt|cautious|patient/.test(t)) return hurt ? { accept: true, counter: null, bark: 'He threatens my customers too, child. I will help.', engine: 'heuristic' } : { accept: false, counter: null, bark: 'Not my goods, not my fight, child. Patience outlasts him.', engine: 'heuristic' };
+  if (/noble|aristocratic|premium/.test(t)) return hurt ? { accept: true, counter: null, bark: 'Very well, darling. I cannot abide a vulgar discounter.', engine: 'heuristic' } : { accept: false, counter: null, bark: 'Darling, my customers do not shop at discount carts.', engine: 'heuristic' };
+  return hurt ? { accept: true, counter: null, bark: 'Agreed. He hurts us both.', engine: 'heuristic' } : { accept: false, counter: null, bark: 'He does not trouble my stall.', engine: 'heuristic' };
 }

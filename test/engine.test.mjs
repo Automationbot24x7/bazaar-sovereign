@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createWorld, step, netWorth, acceptContract, executeDeal, executeBuyout, takeover, takeoverPrice,
   backroomDeals, standings, chartersOwned, SEASON_DAYS, TRIBUTE,
+  MAGNATE, GUILD, WATCH_COST, raidMagnate, joinPact, borrow, repay, debtOf, bondOwed, hireWatch,
 } from '../server/engine.js';
 
 const roster = () => [
@@ -117,4 +118,81 @@ test('reserved Palace stock does not spoil; half an order earns a partial reward
   const c = w.contracts.find(c => c.id === 'PO-P');
   assert.equal(c.status, 'delivered');
   assert.equal(c.partial, 12);
+});
+
+const until = (w, day) => { while (w.day < day && !w.over) step(w); };
+
+test('the Magnate arrives on day 6, sells two goods below cost and leaves once he has lost his patience', () => {
+  const w = world(5);
+  until(w, MAGNATE.rumorDay);
+  assert.equal(w.magnate.stage, 'coming');
+  until(w, MAGNATE.arriveDay);
+  const mg = w.magnate;
+  assert.equal(mg.stage, 'dumping');
+  assert.equal(mg.goods.length, 2);
+  until(w, SEASON_DAYS);
+  assert.ok(['gone', 'gouging'].includes(mg.stage), `stage ${mg.stage}`);
+  if (mg.stage === 'gone' && mg.why === 'bled') assert.ok(mg.loss >= MAGNATE.patience);
+});
+
+test('buying off the Magnate\'s carts is capped, delivered overnight and costs him patience', () => {
+  const w = world(6);
+  until(w, MAGNATE.arriveDay);
+  const me = M(w, 'you'), g = w.magnate.goods[0], held = me.inventory[g], loss = w.magnate.loss;
+  me.gold = 1000;
+  const r = raidMagnate(w, me, g, 50);
+  assert.equal(r.qty, MAGNATE.raidCap, 'capped per day');
+  assert.equal(me.inventory[g], held, 'not delivered until tonight');
+  assert.ok(w.magnate.loss > loss, 'every unit bought is his loss');
+  assert.throws(() => raidMagnate(w, me, g, 1), /at most/);
+  const other = ['saffron', 'silk', 'tea', 'salt'].find(x => !w.magnate.goods.includes(x));
+  assert.throws(() => raidMagnate(w, me, other, 1), /does not sell/);
+  step(w);
+  assert.ok(me.inventory[g] >= held + MAGNATE.raidCap - 1, 'delivered overnight');
+});
+
+test('pact allies raid his carts every day', () => {
+  const w = world(7);
+  until(w, MAGNATE.arriveDay);
+  const a = M(w, 'a');
+  a.gold = 600;
+  joinPact(w, a);
+  const loss = w.magnate.loss;
+  step(w);
+  assert.ok(w.magnate.hits.some(h => h.by === 'a'), 'ally bought off his carts');
+  assert.ok(w.magnate.loss > loss);
+});
+
+test('Guild bonds charge a fee and daily interest, count against net worth, and are capped', () => {
+  const w = world();
+  const me = M(w, 'you'), worth = netWorth(w, me);
+  borrow(w, me);
+  assert.equal(me.gold, 300 + GUILD.bond);
+  assert.equal(debtOf(w, me), Math.round(GUILD.bond * (1 + GUILD.fee)));
+  assert.ok(netWorth(w, me) < worth, 'the fee costs net worth at once');
+  borrow(w, me);
+  assert.throws(() => borrow(w, me), /at most/);
+  w.day += 4;
+  const owe = bondOwed(w, me.bonds[0]);
+  assert.equal(owe, Math.round(GUILD.bond * (1 + GUILD.fee + GUILD.daily * 4)));
+  const gold = me.gold;
+  repay(w, me);
+  assert.equal(me.gold, gold - owe);
+  assert.equal(me.bonds.length, 1);
+  assert.equal(w.guildLog.map(x => x.kind).join(','), 'borrow,borrow,repay');
+});
+
+test('a hostile rival\'s rats are telegraphed; a night watch stops them, otherwise stock is lost', () => {
+  for (const watch of [true, false]) {
+    const w = world(11);
+    const me = M(w, 'you'), foe = M(w, 'a');
+    foe.relation = -3;
+    me.inventory.saffron = 40;
+    w.plot = { by: 'a', target: 'you', day: w.day + 1 };
+    if (watch) { const gold = me.gold; hireWatch(w, me); assert.equal(me.gold, gold - WATCH_COST); }
+    const before = me.inventory.saffron;
+    step(w);
+    if (watch) assert.match(w.news.map(n => n.text).join(' '), /night watch caught/);
+    else assert.ok(me.inventory.saffron <= before - 10 + 2, `rats ate saffron (${before} -> ${me.inventory.saffron})`);
+  }
 });

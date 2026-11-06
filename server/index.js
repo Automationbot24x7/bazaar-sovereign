@@ -6,8 +6,9 @@ import {
   GOODS, STANCES, SEASON_DAYS, createWorld, openingNews, step, netWorth, trading, takeover, takeoverPrice,
   acceptContract, executeDeal, executeBuyout, buyoutValue, standings, chartersOwned, log, checkSeason, backroomDeals, TRIBUTE,
   hireHelpers, buyAwning, capacity, HELPER_WAGE, AWNING_COST,
+  MAGNATE, GUILD, WATCH_COST, magnatePrice, raidMagnate, joinPact, borrow, repay, debtOf, bondOwed, canBorrow, hireWatch,
 } from './engine.js';
-import { think, interpretOrder, answerOffer, aiOn, stats, MODEL_LABEL } from './brains.js';
+import { think, interpretOrder, answerOffer, answerPact, aiOn, stats, MODEL_LABEL, spend } from './brains.js';
 import { makeChain, testnetAvailable } from './chain.js';
 
 const PORT = process.env.PORT || 3000;
@@ -138,8 +139,22 @@ class Game {
     if (w.over) { this.pause(); return; }
     const hadRumor = w.pending, openBefore = w.contracts.filter(c => c.status === 'open' && !c.takenBy).length;
     const bankruptBefore = new Set(w.merchants.filter(m => m.bankrupt).map(m => m.id));
+    const magnateBefore = w.magnate?.stage, plotBefore = w.plot;
     const { settlement } = step(w);
     for (const r of settlement) this.pnlBuffer[r.merchant] = (this.pnlBuffer[r.merchant] || 0) + r.pnl;
+    this.mirrorGuild();
+    const rats = w.lastRats?.day === w.day && w.lastRats;
+    if (rats) {
+      const by = w.merchants.find(m => m.id === rats.by), t = w.merchants.find(m => m.id === rats.target);
+      if (rats.qty) {
+        this.chain.recordLoss(t, rats.good, `Rats ruined ${rats.qty} ${rats.good} in ${t.player ? 'your' : t.name + "'s"} warehouse; the tokens are burned.`);
+        lesson(by, `Set rats on the player's warehouse on day ${w.day}; they lost ${rats.qty} ${rats.good}.`, 'Sent rats to your warehouse', 'bad');
+      } else lesson(by, `My rats were caught by the player's night watch on day ${w.day}.`, 'Rats caught by your watch', 'warn');
+    }
+    if (magnateBefore === 'dumping' && w.magnate?.stage !== 'dumping') {
+      const mg = w.magnate;
+      for (const m of this.npcs()) lesson(m, mg.stage === 'gone' ? `${MAGNATE.name} gave up and left the bazaar on day ${w.day} after losing ${Math.round(mg.loss)} coins.` : `${MAGNATE.name} took over ${mg.goods.join(' and ')} on day ${w.day} and raised prices.`, mg.stage === 'gone' ? `Saw ${MAGNATE.name} leave` : `${MAGNATE.name} owns ${mg.goods.join('+')}`, 'warn');
+    }
     if (w.lastStorm?.day === w.day) for (const m of this.npcs()) { const l = w.lastStorm.losses[m.id]; if (l > 0) lesson(m, `A sudden storm on day ${w.day} soaked ${l} coins of my stock; I had no awning.`, `Soaked by the storm −${l}`, 'bad'); }
     for (const d of backroomDeals(w, m => m.relation || 0)) {
       this.chain.recordDeal(d.buyer, d.seller, d.good, d.qty, d.total, w.merchants);
@@ -184,12 +199,55 @@ class Game {
       const hire = e.demand && !me.helpers ? [{ label: `Hire 2 helpers for the feast (${2 * HELPER_WAGE} coins/day)`, act: 'hire', n: 2, days: 4 }] : [];
       d = { kind: 'rumor', title: 'A rumor in the bazaar', text: `“${e.rumor}” ${hint}${e.demand ? ' Crowds will be bigger than one stall can serve.' : ''}`, actions: [...actions, ...hire, { label: 'Ignore it', act: 'resume' }] };
     }
+    const mg = w.magnate;
+    if (!d && magnateBefore === 'coming' && mg?.stage === 'dumping') {
+      const best = [...mg.goods].sort((a, b) => w.prices[b] - w.prices[a])[0];
+      d = { kind: 'magnate', title: `${MAGNATE.name} opens his stall`, text: `${MAGNATE.title} sells ${mg.goods.map(x => `${G[x].name.toLowerCase()} at ${magnatePrice(w, x)}`).join(' and ')} coins, below his own cost, to steal every customer. He stays only while it pays. Make it not pay: buy off his carts (up to ${MAGNATE.raidCap} a day, delivered overnight), rally the rivals into a pact, or trade the goods he ignores.`,
+        actions: [{ label: 'Rally the rivals', act: 'pacts' }, { label: `Buy ${MAGNATE.raidCap} cheap ${G[best].name.toLowerCase()}`, act: 'raid', good: best }, { label: 'Ignore him for now', act: 'resume' }] };
+    } else if (!d && w.plot && w.plot !== plotBefore && w.plot.target === me.id) {
+      const foe = w.merchants.find(m => m.id === w.plot.by);
+      d = { kind: 'bankrupt', title: 'Rats!', text: `${foe.name} resents you and was seen with the rat-catcher. Tomorrow night your warehouse could lose a quarter of its most valuable perishable stock. A night watch costs ${WATCH_COST} coins, or make ${foe.name} a fair offer to calm them down.`,
+        actions: [{ label: `Hire the night watch (${WATCH_COST} coins)`, act: 'watch' }, { label: `Make ${foe.name} an offer`, act: 'deal', target: foe.id }, { label: 'Take the risk', act: 'resume' }] };
+    }
     const storm = w.lastStorm?.day === w.day;
     if (!d && storm && !me.awning) {
       const lost = w.lastStorm.losses[me.id] || 0;
       d = { kind: 'bankrupt', title: 'A sudden storm!', text: `Rain soaked your stock: about ${lost} coins of goods ruined. ${Object.entries(w.lastStorm.losses).filter(([id, v]) => id !== 'you' && v === 0).length ? 'Stalls with an awning lost nothing.' : ''} An awning costs ${AWNING_COST} coins, once.`, actions: [{ label: `Buy an awning (${AWNING_COST} coins)`, act: 'awning' }, { label: 'Take the risk', act: 'resume' }] };
     }
     if (d && this.autoPause && this.running) { this.decision = { ...d, day: w.day }; this.pause(); }
+  }
+  // loans and repayments become treasury <-> wallet transfers
+  mirrorGuild() {
+    const w = this.world;
+    for (const e of w.guildLog.splice(0)) this.chain.recordGuild(w.merchants.find(m => m.id === e.id), e.kind, e.amount);
+  }
+  // ask rivals to join a pact against the Magnate (all of them, or one)
+  async askPact(target, pay) {
+    const w = this.world, me = this.me(), mg = w.magnate;
+    if (mg?.stage !== 'dumping') throw new Error(`${MAGNATE.name} is not dumping goods right now`);
+    mg.asks ||= {};
+    const rivals = this.npcs().filter(m => (!target || m.id === target) && !mg.allies.includes(m.id));
+    if (!rivals.length) throw new Error(target ? 'They are already in your pact' : 'Every rival is already in your pact');
+    const replies = await Promise.all(rivals.map(async r => {
+      const prior = mg.asks[r.id];
+      if (pay && prior?.counter) {
+        if (me.gold < prior.counter) throw new Error(`You need ${prior.counter} coins`);
+        me.gold -= prior.counter; r.gold += prior.counter; me.pnlAdj = (me.pnlAdj || 0) - prior.counter; r.pnlAdj = (r.pnlAdj || 0) + prior.counter;
+        return { r, a: { accept: true, counter: null, bark: 'Paid in full. My carts are yours.' } };
+      }
+      if (prior && !prior.accept && !prior.counter && prior.day === w.day) return { r, a: prior };
+      return { r, a: await withAiSlot(() => answerPact(w, r, me), () => answerPact(w, { ...r, _offline: true }, me)) };
+    }));
+    for (const { r, a } of replies) {
+      mg.asks[r.id] = { accept: a.accept, counter: a.accept ? null : a.counter, bark: a.bark, day: w.day };
+      if (a.bark) r.bark = a.bark;
+      if (a.accept) {
+        joinPact(w, r);
+        r.relation = Math.min(3, (r.relation || 0) + 1);
+        lesson(r, `Joined the player's pact against ${MAGNATE.name} on day ${w.day}.`, `Allied vs ${MAGNATE.name}`, 'good');
+      } else log(w, `${r.name} ${a.counter ? `will join your pact for ${a.counter} coins` : 'refuses your pact'}: “${a.bark}”`, 'magnate');
+    }
+    return replies.map(({ r, a }) => ({ id: r.id, name: r.name, accept: a.accept, counter: a.counter || null, bark: a.bark }));
   }
   flush() {
     const w = this.world;
@@ -232,7 +290,16 @@ class Game {
       })),
       standings: standings(w), over: w.over, result: w.result,
       chainFeed: this.chain.feed.slice(0, 30),
-      me: { gold: Math.round(me.gold) },
+      me: { gold: Math.round(me.gold), debt: debtOf(w, me), bonds: (me.bonds || []).map(b => ({ day: b.day, owed: bondOwed(w, b) })), canBorrow: canBorrow(w, me), watch: w.plot?.target === me.id && me.watchDay === w.plot.day },
+      guild: { bond: GUILD.bond, fee: GUILD.fee, daily: GUILD.daily, maxBonds: GUILD.maxBonds },
+      plot: w.plot?.target === me.id ? { by: w.plot.by, byName: w.merchants.find(m => m.id === w.plot.by)?.name, day: w.plot.day, watchCost: WATCH_COST } : null,
+      magnate: w.magnate ? {
+        name: MAGNATE.name, title: MAGNATE.title, stage: w.magnate.stage, goods: w.magnate.goods || [], arriveDay: MAGNATE.arriveDay,
+        prices: Object.fromEntries((w.magnate.goods || []).map(x => [x, magnatePrice(w, x)])),
+        loss: Math.round(w.magnate.loss || 0), patience: MAGNATE.patience, lastLoss: w.magnate.lastLoss || 0, left: w.magnate.left || null, why: w.magnate.why || null,
+        raidCap: MAGNATE.raidCap, raidLeft: MAGNATE.raidCap - (me.raidDay === w.day ? me.raided || 0 : 0), incoming: (me.incoming || []).reduce((t, d) => t + d.qty, 0),
+        allies: (w.magnate.allies || []), asks: w.magnate.asks || {}, hits: (w.magnate.hits || []).slice(0, 5),
+      } : null,
     };
   }
 }
@@ -332,7 +399,7 @@ const lastOrder = new Map();
 http.createServer(async (req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
   try {
-    if (p === '/healthz') return send(res, 200, { ok: true, games: games.size, liveTables: LIVE_TABLES, liveSeated: liveSeats.filter(Boolean).length, aiInflight });
+    if (p === '/healthz') return send(res, 200, { ok: true, aiSpendToday: spend.usd, games: games.size, liveTables: LIVE_TABLES, liveSeated: liveSeats.filter(Boolean).length, aiInflight });
     if (p.startsWith('/api/')) {
       const g = gameFor(req, res);
       if (p === '/api/state') return send(res, 200, g.view());
@@ -353,6 +420,10 @@ http.createServer(async (req, res) => {
             if (a.act === 'doctrine') me.doctrine = { ...a.doctrine };
             if (a.act === 'hire') hireHelpers(w, me, a.n, a.days);
             if (a.act === 'awning') buyAwning(w, me);
+            if (a.act === 'watch') hireWatch(w, me);
+            if (a.act === 'raid') raidMagnate(w, me, a.good, MAGNATE.raidCap);
+            if (a.act === 'pacts') { const replies = await g.askPact(null, false); g.play(); return send(res, 200, { ...g.view(), pactReplies: replies }); }
+            if (a.act === 'deal') { g.decision = null; return send(res, 200, { ...g.view(), openDeal: a.target }); }
             if (a.act === 'claim') { acceptContract(w, me, a.id); me.doctrine = { stance: 'corner', focus: w.contracts.find(c => c.id === a.id).good, aggression: Math.max(0.7, me.doctrine.aggression) }; }
             if (a.act === 'takeover') { const t = w.merchants.find(m => m.id === a.target); const price = takeover(w, me, t); g.chain.recordCharterSale(me, t, price, 'bankruptcy seizure'); t.bark = 'A new master, a fresh start. I will not fail you.'; checkSeason(w); }
           } catch (e) { g.decision = null; return send(res, 400, { error: e.message }); }
@@ -387,6 +458,11 @@ http.createServer(async (req, res) => {
         }
         case '/api/contract': acceptContract(w, me, b.id); me.doctrine = { stance: 'corner', focus: w.contracts.find(c => c.id === b.id).good, aggression: Math.max(0.7, me.doctrine.aggression) }; return send(res, 200, g.view());
         case '/api/offer': return send(res, 200, await makeOffer(g, b));
+        case '/api/raid': { raidMagnate(w, me, b.good, Number(b.qty) || MAGNATE.raidCap); return send(res, 200, g.view()); }
+        case '/api/pact': { const replies = await g.askPact(b.target || null, !!b.pay); return send(res, 200, { ...g.view(), pactReplies: replies }); }
+        case '/api/borrow': { borrow(w, me); g.mirrorGuild(); return send(res, 200, g.view()); }
+        case '/api/repay': { repay(w, me); g.mirrorGuild(); return send(res, 200, g.view()); }
+        case '/api/watch': { hireWatch(w, me); return send(res, 200, g.view()); }
         case '/api/takeover': {
           const t = w.merchants.find(m => m.id === b.target);
           if (!t || t.ownedBy || !t.bankrupt) return send(res, 400, { error: 'not available' });
@@ -407,7 +483,7 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': extname(file) === '.webp' ? 'public, max-age=86400' : 'no-cache' });
     res.end(data);
   } catch (e) {
-    if (!/not trading|no longer open|already holds|need|only|Give them|Choose|Name a price|doesn't have|costs/i.test(e.message)) console.error(e);
+    if (!/not trading|no longer open|already holds|need|only|Give them|Choose|Name a price|doesn't have|costs|clerks|not selling|does not sell|not dumping|Guild|Nothing is owed|watch|plotting|pact|bankrupt house/i.test(e.message)) console.error(e);
     send(res, 400, { error: e.message });
   }
 }).listen(PORT, () => {

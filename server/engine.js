@@ -50,6 +50,9 @@ export function createWorld({ seed = 7, merchants }) {
     })),
     ledger: [],        // per-day settlement rows for the chain layer
     contracts: [],     // Palace orders: {id, good, qty, reward, due, takenBy, status}
+    magnate: null,     // the rich outsider (see MAGNATE)
+    plot: null,        // a rival's rat plot against a warehouse: {by, target, day}
+    guildLog: [],      // loans and repayments for the chain layer to mirror
     over: false, result: null,
   };
 }
@@ -63,7 +66,7 @@ export const trading = m => !m.bankrupt; // vassal stalls keep trading under the
 export const log = (w, text, kind = 'info') => { w.news.unshift({ day: w.day, text, kind }); w.news.length = Math.min(w.news.length, 60); };
 
 export function netWorth(w, m) {
-  return m.gold + GOODS.reduce((t, g) => t + m.inventory[g.id] * w.prices[g.id] * 0.8, 0);
+  return m.gold + GOODS.reduce((t, g) => t + m.inventory[g.id] * w.prices[g.id] * 0.8, 0) - debtOf(w, m);
 }
 
 function modifiers(w) {
@@ -205,14 +208,22 @@ export function step(w) {
     w.pending = e;
     log(w, `Rumor: ${e.rumor}`, 'rumor');
   }
+  magnateMorning(w);
+  ratsMorning(w);
   for (const v of w.merchants.filter(m => m.ownedBy && trading(m))) { const o = w.merchants.find(x => x.id === v.ownedBy); if (o) v.doctrine = { ...o.doctrine }; }
+  allyRaids(w);
   const { sup, dem, rent } = modifiers(w);
   const alive = w.merchants.filter(trading);
   for (const m of w.merchants) m.servedToday = 0;
   const pnl = Object.fromEntries(w.merchants.map(m => [m.id, 0]));
+  const mg = magnateSelling(w) ? w.magnate : null;
+  if (mg) { pnl.magnate = 0; mg.stall.gold = 0; mg.today = { sold: 0, houses: 0 }; }
 
   for (const g of GOODS) {
-    const book = alive.map(m => ({ m, ...orders(w, m, g, alive.filter(r => r !== m)) }));
+    const hisGood = mg && mg.goods.includes(g.id);
+    if (hisGood) { mg.stall.inventory[g.id] = MAGNATE.shelf; mg.stall.lastAsk = { ...mg.stall.lastAsk, [g.id]: magnatePrice(w, g.id) }; }
+    const book = alive.map(m => ({ m, ...orders(w, m, g, [...alive.filter(r => r !== m), ...(hisGood ? [mg.stall] : [])]) }));
+    if (hisGood) book.push({ m: mg.stall, buyQty: 0, maxBid: 0, ask: magnatePrice(w, g.id), sellCap: MAGNATE.shelf });
     // ---- wholesale: pay-as-bid, highest bidder first ----
     let supply = Math.round(g.supply * sup[g.id] * (0.85 + w.rand() * 0.3));
     const reserve = g.base * 0.58; // suppliers won't sell below this
@@ -262,6 +273,7 @@ export function step(w) {
         if (!served) break;
       }
     }
+    if (hisGood) { const his = MAGNATE.shelf - mg.stall.inventory[g.id]; mg.today.sold += his; mg.today.houses += sold - his; mg.today[g.id] = his; }
     // market price = volume-weighted ask, or drifts up when nobody sells (scarcity)
     const unmet = A > 0 && sold === 0;
     const px = sold ? revenue / sold : w.prices[g.id] * (unmet ? 1.12 : 1);
@@ -269,6 +281,9 @@ export function step(w) {
     w.history[g.id].push(w.prices[g.id]);
     if (w.history[g.id].length > 120) w.history[g.id].shift();
   }
+
+  // coins spent off the Magnate's carts (or on a night watch) count in the day's books
+  for (const m of w.merchants) if (m.pnlAdj) { pnl[m.id] += m.pnlAdj; m.pnlAdj = 0; }
 
   // ---- the Palace: deliveries, deadlines, new orders ----
   const before = Object.fromEntries(w.merchants.map(m => [m.id, m.gold]));
@@ -285,6 +300,8 @@ export function step(w) {
       if (g.spoil && m.inventory[g.id] > keep) m.inventory[g.id] = keep + Math.floor((m.inventory[g.id] - keep) * (1 - g.spoil));
     }
     m.gold -= cost; pnl[m.id] -= cost;
+    // a rival short on rent takes a bridge bond from the Guild before pawning stock (unless it hates debt)
+    if (m.gold < 0 && !m.player && !debtShy(m) && canBorrow(w, m)) { try { borrow(w, m, 'to cover the rent'); } catch {} }
     // fire sale: dump stock to pawnbrokers at 45% of base before declaring bankruptcy
     for (const g of GOODS) {
       if (m.gold >= 0) break;
@@ -302,7 +319,24 @@ export function step(w) {
       m.bankrupt = true;
       m.bark = 'My stall… my ledger… ruined!';
       log(w, `${m.name} is BANKRUPT. Their merchant charter is up for takeover.`, 'bankrupt');
+      if (m.bonds?.length) {
+        // the Guild seizes whatever stock is left and writes off the rest
+        for (const g of GOODS) m.inventory[g.id] = 0;
+        m.bonds = [];
+        log(w, `The Moneylenders' Guild seizes what is left in ${m.name}'s warehouse.`, 'guild');
+      }
+    } else if (!m.player && m.bonds?.length && m.gold > debtOf(w, m) + 250) {
+      while (m.bonds.length && m.gold > bondOwed(w, m.bonds[0]) + 250) repay(w, m);
     }
+  }
+  magnateEvening(w);
+  // stock bought off the Magnate's carts arrives overnight
+  for (const m of w.merchants) {
+    for (const d of m.incoming || []) {
+      m.cost[d.good] = (m.cost[d.good] * m.inventory[d.good] + d.price * d.qty) / (m.inventory[d.good] + d.qty);
+      m.inventory[d.good] += d.qty;
+    }
+    m.incoming = [];
   }
   for (const m of w.merchants) { m.netHistory.push(+netWorth(w, m).toFixed(2)); if (m.netHistory.length > 120) m.netHistory.shift(); }
   for (const m of w.merchants) if (m.helpers && --m.helperDays <= 0) { m.helpers = 0; m.helperDays = 0; }
@@ -450,4 +484,201 @@ export function rivalPreparations(w) {
     const soaked = w.lastStorm?.losses?.[m.id] > 0 && w.lastStorm.day === w.day;
     if (!m.awning && !reckless && m.gold > 300 && (soaked || (careful && w.day >= 6))) { try { buyAwning(w, m); } catch {} }
   }
+}
+
+// ---------- the Magnate: a rich outsider who sells below cost until it stops paying ----------
+// He arrives on day 6 (a rumor the day before), picks the two goods with the fattest margins and
+// sells them under the bazaar's own wholesale price, swallowing the loss. Every coin he loses
+// wears down his patience; when it runs out he decides the bazaar is not worth it and leaves.
+// If instead the houses abandon his goods (or two of them go bankrupt), he owns those markets
+// and switches to gouging until someone undercuts him. Houses can buy off his carts (capped,
+// delivered overnight): every unit bought below his cost is his loss.
+export const MAGNATE = {
+  name: 'Baltazar', title: 'Magnate Baltazar of the Golden Caravan Company',
+  rumorDay: 5, arriveDay: 6,
+  patience: 900,     // coins of losses he will swallow before leaving
+  overhead: 25,      // his caravans and guards, per day
+  importCost: 0.68,  // his landed cost, x base price
+  dumpPrice: 0.55,   // his shelf price while dumping, x base price
+  rushCost: 0.85,    // what it costs him to rush in a caravan to replace stock bought off his carts, x base
+  gougePrice: 1.6,   // his shelf price once he owns a market
+  shelf: 10,         // units of each of his goods he puts out for shoppers each day
+  raidCap: 8,        // units any one house may buy off his carts per day
+};
+const magnateSelling = w => ['dumping', 'gouging'].includes(w.magnate?.stage);
+export const magnatePrice = (w, good) => +(G[good].base * (w.magnate?.stage === 'gouging' ? MAGNATE.gougePrice : MAGNATE.dumpPrice)).toFixed(2);
+const nameList = goods => goods.map(g => G[g].name.toLowerCase()).join(' and ');
+
+function magnateMorning(w) {
+  if (w.day === MAGNATE.rumorDay && !w.magnate) {
+    w.magnate = { stage: 'coming' };
+    log(w, 'Rumor: a rich outsider’s caravans are camped outside the gates, loaded to the axles…', 'rumor');
+    return;
+  }
+  const mg = w.magnate;
+  if (mg?.stage === 'coming' && w.day >= MAGNATE.arriveDay) {
+    const margin = g => (w.prices[g.id] - g.base * 0.62) * g.demand;
+    const goods = [...GOODS].sort((a, b) => margin(b) - margin(a)).slice(0, 2).map(g => g.id);
+    Object.assign(mg, {
+      stage: 'dumping', goods, loss: 0, arrived: w.day, allies: [], declined: [], quiet: 0, slow: 0, lastLoss: 0, hits: [],
+      fallenBefore: w.merchants.filter(m => m.bankrupt).length,
+      stall: { id: 'magnate', name: MAGNATE.name, inventory: Object.fromEntries(GOODS.map(g => [g.id, 0])), cost: {}, gold: 0, helpers: 20, doctrine: { stance: 'steady', focus: null, aggression: 0.5 }, servedToday: 0, lastAsk: {} },
+    });
+    log(w, `${MAGNATE.title} opens a vast stall and sells ${nameList(goods)} below cost. He will stay only while it pays.`, 'magnate');
+  }
+}
+
+function magnateEvening(w) {
+  const mg = w.magnate;
+  if (!magnateSelling(w) || !mg.today) return;
+  const cost = mg.goods.reduce((t, g) => t + (mg.today[g] || 0) * G[g].base * MAGNATE.importCost, 0);
+  const day = cost - mg.stall.gold + MAGNATE.overhead; // positive = a losing day
+  mg.loss = Math.max(0, mg.loss + day);
+  mg.lastLoss = Math.round(day);
+  const share = mg.today.houses / Math.max(1, mg.today.houses + mg.today.sold);
+  if (mg.stage === 'dumping') {
+    if (mg.loss >= MAGNATE.patience) return magnateLeaves(w, 'bled');
+    mg.quiet = share < 0.15 ? mg.quiet + 1 : 0;
+    const fallen = w.merchants.filter(m => m.bankrupt).length - mg.fallenBefore;
+    if (mg.quiet >= 2 || fallen >= 2) {
+      mg.stage = 'gouging';
+      log(w, `The houses have given up on ${nameList(mg.goods)}. ${MAGNATE.name} owns those markets now and raises his prices sharply.`, 'magnate');
+    }
+  } else {
+    mg.slow = mg.today.sold < 3 ? mg.slow + 1 : 0;
+    if (mg.slow >= 2) magnateLeaves(w, 'undercut');
+  }
+}
+
+function magnateLeaves(w, why) {
+  const mg = w.magnate;
+  mg.stage = 'gone'; mg.left = w.day; mg.why = why;
+  log(w, why === 'bled'
+    ? `${MAGNATE.name} has lost ${Math.round(mg.loss)} coins in this stubborn bazaar. He packs his caravans and leaves: it is not worth his gold.`
+    : `Nobody pays ${MAGNATE.name}'s prices any more. He packs his caravans and leaves the bazaar.`, 'magnate');
+}
+
+// Buy cheap stock off the Magnate's carts while he is dumping: capped per house per day, delivered overnight.
+export function raidMagnate(w, m, good, qty) {
+  const mg = w.magnate;
+  if (mg?.stage !== 'dumping') throw new Error(`${MAGNATE.name} is not selling cheap right now`);
+  if (!mg.goods.includes(good)) throw new Error(`${MAGNATE.name} does not sell ${G[good].name.toLowerCase()}`);
+  if (!trading(m)) throw new Error('A bankrupt house cannot trade');
+  if (m.raidDay !== w.day) { m.raidDay = w.day; m.raided = 0; }
+  const price = +(G[good].base * MAGNATE.dumpPrice).toFixed(2);
+  if (MAGNATE.raidCap - m.raided < 1) throw new Error(`His clerks sell each house at most ${MAGNATE.raidCap} a day`);
+  qty = Math.min(Math.floor(qty), MAGNATE.raidCap - m.raided, Math.floor(m.gold / price)); // as many as you can afford
+  if (qty < 1) throw new Error(`You need ${Math.ceil(price)} coins for even one ${G[good].unit}`);
+  const total = +(qty * price).toFixed(2);
+  m.gold = +(m.gold - total).toFixed(2); m.pnlAdj = (m.pnlAdj || 0) - total; m.raided += qty;
+  (m.incoming ||= []).push({ good, qty, price });
+  const hurt = Math.round(qty * G[good].base * (MAGNATE.rushCost - MAGNATE.dumpPrice));
+  mg.loss += hurt;
+  mg.hits.unshift({ day: w.day, by: m.id, name: m.name, good, qty, hurt }); mg.hits.length = Math.min(mg.hits.length, 8);
+  return { qty, total, hurt, price };
+}
+
+// Rivals in a pact with the player raid his carts every day; a rival racing a Palace order for one of his goods does too.
+function allyRaids(w) {
+  const mg = w.magnate;
+  if (mg?.stage !== 'dumping') return;
+  const done = [];
+  for (const m of w.merchants.filter(m => !m.player && trading(m) && !m.ownedBy)) {
+    const order = w.contracts.find(c => c.status === 'open' && c.takenBy === m.id && mg.goods.includes(c.good));
+    if (!mg.allies.includes(m.id) && !order) continue;
+    const good = order?.good || [...mg.goods].sort((a, b) => G[b].base - G[a].base)[0];
+    const price = G[good].base * MAGNATE.dumpPrice;
+    let qty = Math.min(MAGNATE.raidCap, Math.floor((m.gold - RENT * 3) / price));
+    if (qty < 3 && mg.allies.includes(m.id) && !debtShy(m) && canBorrow(w, m)) {
+      try { borrow(w, m, `to raid ${MAGNATE.name}'s carts`); } catch {}
+      qty = Math.min(MAGNATE.raidCap, Math.floor((m.gold - RENT * 3) / price));
+    }
+    if (qty < 1) continue;
+    try { const r = raidMagnate(w, m, good, qty); done.push(`${m.name} ${r.qty} ${G[good].name.toLowerCase()}`); } catch {}
+  }
+  if (done.length) log(w, `Bought off ${MAGNATE.name}'s carts, at a loss to him: ${done.join(', ')}.`, 'magnate');
+}
+
+export function joinPact(w, rival) {
+  const mg = w.magnate;
+  if (mg?.stage !== 'dumping') throw new Error('There is no price war to fight right now');
+  if (!mg.allies.includes(rival.id)) mg.allies.push(rival.id);
+  log(w, `${rival.name} joins your pact against ${MAGNATE.name}: they will buy off his carts every day.`, 'magnate');
+}
+
+// ---------- the Moneylenders' Guild: fixed bonds with a fee and daily interest ----------
+export const GUILD = { bond: 150, fee: 0.05, daily: 0.03, maxBonds: 2 };
+export const bondOwed = (w, b) => Math.round(b.principal * (1 + GUILD.fee + GUILD.daily * Math.max(0, w.day - b.day)));
+export function debtOf(w, m) { return (m.bonds || []).reduce((t, b) => t + bondOwed(w, b), 0); }
+const debtShy = m => /hates debt/i.test(m.persona || '');
+export function canBorrow(w, m) {
+  if (!trading(m) || (m.bonds || []).length >= GUILD.maxBonds) return false;
+  return !(m.bonds || []).length || netWorth(w, m) >= GUILD.bond; // a second bond needs collateral
+}
+export function borrow(w, m, why = '') {
+  if (!trading(m)) throw new Error('The Guild does not lend to a bankrupt house');
+  if ((m.bonds || []).length >= GUILD.maxBonds) throw new Error(`The Guild lends at most ${GUILD.maxBonds} bonds at a time`);
+  if (!canBorrow(w, m)) throw new Error('The Guild wants more collateral before a second bond');
+  (m.bonds ||= []).push({ principal: GUILD.bond, day: w.day });
+  m.gold = +(m.gold + GUILD.bond).toFixed(2);
+  log(w, `${m.name} took a ${GUILD.bond}-coin bond from the Moneylenders' Guild${why ? ' ' + why : ''}.`, 'guild');
+  w.guildLog.push({ id: m.id, kind: 'borrow', amount: GUILD.bond });
+}
+export function repay(w, m) {
+  const b = m.bonds?.[0];
+  if (!b) throw new Error('Nothing is owed to the Guild');
+  const owe = bondOwed(w, b);
+  if (m.gold < owe) throw new Error(`You need ${owe} coins to repay the bond`);
+  m.gold = +(m.gold - owe).toFixed(2); m.bonds.shift();
+  log(w, `${m.name} repaid a Guild bond: ${owe} coins (${owe - b.principal} of it fees and interest).`, 'guild');
+  w.guildLog.push({ id: m.id, kind: 'repay', amount: owe });
+}
+
+// ---------- rats: a hostile rival hires the rat-catcher against your warehouse ----------
+// Telegraphed a day ahead by a rumor. Counter: a night watch for that night, or make peace with
+// the rival (a fair deal lifts their attitude) before the rats are let loose.
+export const WATCH_COST = 25;
+const PERISHABLE = ['saffron', 'silk', 'tea']; // rats leave salt alone
+function ratsMorning(w) {
+  const p = w.plot, M = id => w.merchants.find(m => m.id === id);
+  if (p && p.day <= w.day) {
+    w.plot = null;
+    const by = M(p.by), t = M(p.target);
+    if (!by || !t || !trading(by) || !trading(t)) {
+      // the plot dies with the plotter's stall
+    } else if ((by.relation || 0) > -2) {
+      log(w, `${by.name} thinks better of it and pays the rat-catcher to stay home.`, 'info');
+    } else if (t.watchDay === w.day) {
+      log(w, `${t.player ? 'Your' : t.name + "'s"} night watch caught ${by.name}'s rat-catcher at the warehouse door. Not a sack was lost.`, 'event');
+      by.bark = 'Watchmen? Who hires watchmen for a few sacks?';
+      w.lastRats = { day: w.day, by: by.id, target: t.id, foiled: true };
+    } else {
+      const spare = g => Math.max(0, t.inventory[g] - reserved(w, t, g));
+      const g = [...PERISHABLE].sort((a, b) => spare(b) * w.prices[b] - spare(a) * w.prices[a])[0];
+      const q = Math.floor(spare(g) * 0.25);
+      if (q > 0) {
+        t.inventory[g] -= q;
+        log(w, `Rats in ${t.player ? 'your' : t.name + "'s"} warehouse! ${q} ${q === 1 ? G[g].unit : G[g].units} of ${G[g].name.toLowerCase()} ruined. ${by.name} hides a smile.`, 'bankrupt');
+        by.bark = `Such a shame about your ${G[g].name.toLowerCase()}. Rats are everywhere these days.`;
+        w.lastRats = { day: w.day, by: by.id, target: t.id, good: g, qty: q };
+      } else log(w, `${by.name}'s rats found an empty warehouse and left hungry.`, 'info');
+    }
+  }
+  // a rival who resents the player may plot (at most once every 6 days each)
+  const me = w.merchants.find(m => m.player);
+  if (!w.plot && me && trading(me) && w.day >= 4 && w.day <= SEASON_DAYS - 2) {
+    const foes = w.merchants.filter(m => !m.player && trading(m) && !m.ownedBy && (m.relation || 0) <= -2 && !(m.lastPlot && w.day - m.lastPlot < 6));
+    if (foes.length && w.rand() < 0.35) {
+      const by = foes[Math.floor(w.rand() * foes.length)];
+      w.plot = { by: by.id, target: me.id, day: w.day + 1 }; by.lastPlot = w.day;
+      log(w, `Rumor: ${by.name} was seen haggling with the rat-catcher, glancing at your warehouse…`, 'rumor');
+    }
+  }
+}
+export function hireWatch(w, m) {
+  if (!w.plot || w.plot.target !== m.id) throw new Error('Nobody is plotting against your warehouse');
+  if (m.watchDay === w.plot.day) throw new Error('The watch is already hired for tonight');
+  if (m.gold < WATCH_COST) throw new Error(`The night watch costs ${WATCH_COST} coins`);
+  m.gold -= WATCH_COST; m.pnlAdj = (m.pnlAdj || 0) - WATCH_COST; m.watchDay = w.plot.day;
+  log(w, `${m.name} hired a night watch for the warehouse (${WATCH_COST} coins).`, 'info');
 }

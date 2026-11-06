@@ -133,9 +133,12 @@ function header() {
   $('#stanceHint').textContent = STANCE_HINT[me.doctrine.stance];
   $('#upgrades').innerHTML = `<span>Serving ${me.servedToday}/${me.capacity} customers today</span>
     ${me.helpers ? `<span>👥 ${me.helpers} helper${me.helpers > 1 ? 's' : ''} · ${me.helperDays}d left <button class="ghost" data-up="fire">Let go</button></span>` : `<button class="ghost" data-up="hire" title="Each helper serves 14 more customers a day for 22 coins/day, for 4 days">👥 Hire a helper</button>`}
-    ${me.awning ? '<span>☂ Awning up</span>' : '<button class="ghost" data-up="awning" title="One-time 120 coins: sudden storms will not soak your stock">☂ Buy an awning (120)</button>'}`;
+    ${me.awning ? '<span>☂ Awning up</span>' : '<button class="ghost" data-up="awning" title="One-time 120 coins: sudden storms will not soak your stock">☂ Buy an awning (120)</button>'}
+    ${guildPill()}
+    ${S.plot ? (S.me.watch ? `<span>🛡 Night watch hired against ${esc(S.plot.byName)}</span>` : `<button class="ghost danger" data-up="watch" title="${esc(S.plot.byName)} is plotting to set rats on your warehouse tomorrow night">🐀 Hire a night watch (${S.plot.watchCost})</button>`) : ''}`;
   decision();
   coach();
+  magnate();
   const b = $('#tableBanner');
   b.hidden = false;
   if (S.table === 'live') { b.className = 'table-banner live'; b.innerHTML = `● <b>Live table${S.liveTables > 1 ? ` ${S.liveTable} of ${S.liveTables}` : ''}.</b> Your game is settling on NEAR testnet — every charter, wallet, sack of goods and payment below is a real transaction. <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">See the contract ↗</a>`; }
@@ -266,11 +269,23 @@ $('#speed').onclick = () => { speedIdx = (speedIdx + 1) % SPEEDS.length; $('#spe
 $('#upgrades').onclick = e => {
   const u = e.target.dataset.up; if (!u) return;
   const me = S.merchants.find(m => m.player);
-  const call = u === 'awning' ? api('/api/awning', {}) : api('/api/hire', { n: u === 'fire' ? 0 : Math.min(3, (me.helpers || 0) + 1), days: 4 });
+  const call = u === 'awning' ? api('/api/awning', {}) : u === 'borrow' ? api('/api/borrow', {}) : u === 'repay' ? api('/api/repay', {}) : u === 'watch' ? api('/api/watch', {})
+    : api('/api/hire', { n: u === 'fire' ? 0 : Math.min(3, (me.helpers || 0) + 1), days: 4 });
   call.then(render).catch(err => alert(err.message));
 };
 $('#autoPause').onchange = e => api('/api/autopause', { on: e.target.checked }).then(render);
-$('#decision').onclick = e => { const i = e.target.dataset.i; if (i != null) { mark('decided'); api('/api/decide', { index: Number(i) }).then(render).catch(err => { alert(err.message); refresh(); }); } };
+$('#decision').onclick = e => {
+  const i = e.target.dataset.i; if (i == null) return;
+  mark('decided'); e.target.disabled = true;
+  api('/api/decide', { index: Number(i) }).then(s => { render(s); if (s.openDeal) openDeal(s.openDeal); }).catch(err => { alert(err.message); refresh(); });
+};
+$('#magnate').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  b.disabled = true;
+  const call = b.dataset.raid ? api('/api/raid', { good: b.dataset.raid, qty: S.magnate.raidLeft })
+    : b.dataset.pact != null ? api('/api/pact', { target: b.dataset.pact || null, pay: !!b.dataset.pay }) : null;
+  call?.then(render).catch(err => { alert(err.message); refresh(); });
+};
 $('#sim').onclick = async e => { const b = e.currentTarget; b.disabled = true; b.textContent = '⏩ …'; const poll = setInterval(refresh, 300); await api('/api/simulate', { days: 10 }).then(render).catch(err => alert(err.message)); clearInterval(poll); b.disabled = S?.over; b.textContent = '⏩ 10 days'; };
 $('#reset').onclick = () => confirm('Start a new season?') && api('/api/reset', {}).then(s => { endShown = false; render(s); });
 $('#again').onclick = () => api('/api/reset', {}).then(s => { $('#end').close(); endShown = false; render(s); });
@@ -302,3 +317,50 @@ try { if (!localStorage.getItem('bs-intro-2')) { $('#intro').showModal(); localS
 refresh();
 setInterval(refresh, 800);
 addEventListener('resize', () => S && render(S));
+
+
+// ---------- the Moneylenders' Guild ----------
+function guildPill() {
+  const me = S.me, g = S.guild;
+  const owe = me.bonds.length ? `<span class="guild">🏦 Debt ${dh(me.debt)} <button class="ghost" data-up="repay" title="Repay the oldest bond: ${dh(me.bonds[0].owed)} with fees and interest">Repay ${dh(me.bonds[0].owed)}</button></span>` : '';
+  const take = me.canBorrow ? `<button class="ghost" data-up="borrow" title="The Moneylenders' Guild: ${g.bond} coins now, ${Math.round(g.fee * 100)}% fee plus ${Math.round(g.daily * 100)}% a day until repaid. Debt counts against your net worth.">🏦 Borrow ${g.bond}</button>` : '';
+  return owe + take;
+}
+
+// ---------- the Magnate: boss banner ----------
+function magnate() {
+  const el = $('#magnate'), mg = S.magnate;
+  const show = mg && !S.over && (mg.stage !== 'gone' || S.day - mg.left <= 2);
+  el.hidden = !show;
+  if (!show) return;
+  const gname = g => goodName(g).toLowerCase();
+  if (mg.stage === 'coming') {
+    el.className = 'magnate coming';
+    el.innerHTML = `🐫 <b>A rich outsider is coming.</b> ${esc(mg.title)}'s caravans are camped outside the gates. Tomorrow he opens a stall to sell below cost: keep some coins ready.`;
+    return;
+  }
+  if (mg.stage === 'gone') {
+    el.className = 'magnate gone';
+    el.innerHTML = `🐫 <b>${esc(mg.name)} has left the bazaar</b> on day ${mg.left}${mg.why === 'bled' ? `, ${dh(mg.loss)} poorer: the bazaar was not worth his gold` : ': nobody would pay his prices'}. Prices of ${mg.goods.map(gname).join(' and ')} can recover now.`;
+    return;
+  }
+  const left = Math.max(0, mg.patience - mg.loss), pct = (left / mg.patience) * 100;
+  const rivalsHere = S.merchants.filter(m => !m.player && m.trading && !m.vassal);
+  const pact = rivalsHere.map(m => {
+    const a = mg.asks[m.id];
+    if (mg.allies.includes(m.id)) return `<span class="ally" title="${esc(a?.bark || '')}">✓ ${esc(m.name)}</span>`;
+    if (a?.counter) return `<span title="${esc(a.bark)}">${esc(m.name)} wants ${dh(a.counter)} <button class="ghost" data-pact="${m.id}" data-pay="1">Pay</button></span>`;
+    if (a && !a.accept) return `<span class="no" title="${esc(a.bark)}">✗ ${esc(m.name)}</span>`;
+    return `<button class="ghost" data-pact="${m.id}">Ask ${esc(m.name)}</button>`;
+  }).join(' ');
+  const unasked = mg.stage === 'dumping' && rivalsHere.some(m => !mg.asks[m.id] && !mg.allies.includes(m.id));
+  el.className = `magnate ${mg.stage}`;
+  el.innerHTML = `<div class="mh">🐫 <b>${esc(mg.name)}</b> ${mg.stage === 'dumping'
+      ? `is dumping ${mg.goods.map(g => `${gname(g)} at <b>${mg.prices[g]}</b>`).join(' and ')} coins, below his own cost.`
+      : `owns the ${mg.goods.map(gname).join(' and ')} markets and charges ${mg.goods.map(g => `<b>${mg.prices[g]}</b>`).join(' / ')}. Undercut him and he leaves.`}</div>
+    <div class="patience" title="He leaves when his losses reach ${mg.patience} coins"><span>Patience</span><div class="bar"><i style="width:${pct}%"></i></div><span>${dh(left)} left${mg.lastLoss > 0 ? ` <em class="hit">−${mg.lastLoss} yesterday</em>` : ''}</span></div>
+    ${mg.stage === 'dumping' ? `<div class="mrow"><span class="muted">Buy off his carts (${mg.raidLeft} of ${mg.raidCap} left today, delivered overnight${mg.incoming ? ` · ${mg.incoming} on the way` : ''}):</span>
+      ${mg.goods.map(g => { const n = Math.min(mg.raidLeft, Math.floor(S.me.gold / mg.prices[g])); return `<button class="primary" data-raid="${g}" ${n ? '' : 'disabled'} title="${n ? '' : 'Not enough coins in the till: borrow from the Guild below'}">Buy ${n || mg.raidLeft || mg.raidCap} ${gname(g)} · ${dh(mg.prices[g] * (n || mg.raidLeft || mg.raidCap))}</button>`; }).join(' ')}</div>
+    <div class="mrow"><span class="muted">Pact:</span> ${pact} ${unasked ? '<button class="ghost" data-pact="">Rally them all</button>' : ''}</div>` : ''}
+    ${mg.hits.length ? `<div class="hits">${mg.hits.map(h => `<span>${esc(h.by === 'you' ? 'You' : h.name)} <em class="hit">−${h.hurt}</em></span>`).join('')}</div>` : ''}`;
+}

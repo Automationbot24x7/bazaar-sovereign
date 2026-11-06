@@ -1,8 +1,8 @@
 // Balance harness: plays many seasons with scripted player strategies against the rivals'
 // offline (heuristic) brains and reports win rates. No network, no API keys.
 // Usage: node tools/balance.mjs [seasons]
-import { createWorld, step, acceptContract, standings, netWorth } from '../server/engine.js';
-import { think } from '../server/brains.js';
+import { createWorld, step, acceptContract, standings, netWorth, raidMagnate, joinPact, MAGNATE } from '../server/engine.js';
+import { think, answerPact } from '../server/brains.js';
 import { ROSTER_FOR_TESTS as ROSTER } from './roster.mjs';
 
 const SEASONS = Number(process.argv[2] || 40);
@@ -24,7 +24,22 @@ const STRATS = {
   },
 };
 
-const out = {};
+// buy off the Magnate's carts every day he dumps (the most valuable of his goods first)
+const raid = (w, me) => {
+  const mg = w.magnate;
+  if (mg?.stage !== 'dumping') return;
+  for (const g of [...mg.goods].sort((a, b) => w.prices[b] - w.prices[a])) { try { raidMagnate(w, me, g, MAGNATE.raidCap); } catch {} }
+};
+const pacts = async (w, me) => {
+  const mg = w.magnate;
+  if (mg?.stage !== 'dumping' || mg.asked) return;
+  mg.asked = true;
+  for (const r of w.merchants.filter(m => !m.player && !m.bankrupt && !m.ownedBy)) { const a = await answerPact(w, { ...r, _offline: true }, me); if (a.accept) joinPact(w, r); }
+};
+STRATS.cornerRaid = (w, me) => { STRATS.rumorCorner(w, me); raid(w, me); };
+STRATS.cornerRaidPact = async (w, me) => { STRATS.rumorCorner(w, me); await pacts(w, me); raid(w, me); };
+
+const out = {}, mags = {};
 for (const [name, play] of Object.entries(STRATS)) {
   const r = { wins: 0, rank: 0, bankrupt: 0, rivalBankrupt: 0, worth: 0, best: {} };
   for (let s = 1; s <= SEASONS; s++) {
@@ -40,7 +55,7 @@ for (const [name, play] of Object.entries(STRATS)) {
           if (d.claim) { const c = w.contracts.find(c => c.status === 'open' && !c.takenBy); if (c) acceptContract(w, m, c.id); }
         }
       }
-      play(w, me);
+      await play(w, me);
       step(w);
     }
     const t = standings(w), rank = t.findIndex(x => x.id === 'you') + 1;
@@ -48,7 +63,10 @@ for (const [name, play] of Object.entries(STRATS)) {
     r.rivalBankrupt += w.merchants.filter(m => !m.player && m.bankrupt).length;
     r.worth += netWorth(w, me);
     r.best[t[0].id] = (r.best[t[0].id] || 0) + 1;
+    const mg = w.magnate, k = mg?.stage === 'gone' ? `left d${mg.left} (${mg.why})` : mg?.stage || 'none';
+    (mags[name] ||= {})[k] = (mags[name][k] || 0) + 1;
   }
   out[name] = { winRate: `${Math.round((r.wins / SEASONS) * 100)}%`, avgRank: (r.rank / SEASONS).toFixed(2), avgWorth: Math.round(r.worth / SEASONS), youBankrupt: r.bankrupt, rivalBankruptcies: r.rivalBankrupt, richestCounts: r.best };
 }
 console.table(out);
+for (const [k, v] of Object.entries(mags)) console.log(k.padEnd(15), JSON.stringify(Object.entries(v).sort((a, b) => b[1] - a[1]).slice(0, 6)));
