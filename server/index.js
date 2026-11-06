@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
-  GOODS, STANCES, SEASON_DAYS, createWorld, step, netWorth, trading, takeover, takeoverPrice,
-  acceptContract, executeDeal, executeBuyout, buyoutValue, standings, chartersOwned, log, checkSeason,
+  GOODS, STANCES, SEASON_DAYS, createWorld, openingNews, step, netWorth, trading, takeover, takeoverPrice,
+  acceptContract, executeDeal, executeBuyout, buyoutValue, standings, chartersOwned, log, checkSeason, backroomDeals, TRIBUTE,
 } from './engine.js';
 import { think, interpretOrder, answerOffer, aiOn, stats, MODEL_LABEL } from './brains.js';
 import { makeChain, testnetAvailable } from './chain.js';
@@ -19,10 +19,18 @@ const AI_MAX_INFLIGHT = Number(process.env.AI_MAX_INFLIGHT || 10);
 
 export const ROSTER = [
   { id: 'you', slug: 'player', art: 'player', name: 'Your House', player: true, color: '#e0a526', persona: 'The player.', model: 'claude-haiku-5-5' },
-  { id: 'teodora', slug: 'teodora', art: 'teodora', name: 'Old Ma Teodora', color: '#5aa469', persona: 'Patient, cautious tea and salt trader with forty years in the bazaar. Hates debt, loves festivals, never panics.', model: 'claude-sonnet-5-5' },
-  { id: 'kasim', slug: 'kasim', art: 'kasim', name: 'Kasim the Quick', color: '#d35d47', persona: 'Loud, fast undercutter who always sells cheaper than everyone. Thin margins, high volume, a little reckless.', model: 'claude-haiku-5-5' },
-  { id: 'vey', slug: 'vey', art: 'vey', name: 'Lady Vey', color: '#8e6cc9', persona: 'Noble premium silk merchant. Refuses to compete on price; sells quality to the rich at high margins. Disdains Kasim.', model: 'claude-sonnet-5-5' },
-  { id: 'ozzo', slug: 'ozzo', art: 'ozzo', name: 'Brother Ozzo', color: '#3b8bd0', persona: 'Bold, greedy schemer who acts on every rumor and tries to corner whatever market is about to spike. Thinks slowly and deeply, plans several moves ahead.', model: 'claude-opus-5-5' },
+  { id: 'teodora', slug: 'teodora', art: 'teodora', name: 'Teodora', color: '#5aa469', model: 'claude-sonnet-5-5',
+    persona: 'An elderly tea and salt trader with forty years at the same stall. Patient and cautious, hates debt, loves festivals, never panics. Calls younger merchants "children".',
+    profile: { bio: 'Forty years at the same tea-and-salt stall. Patient, debt-shy, and never panics.', opening: 'Steady trade in cheap staples, saving her strength for festivals.' } },
+  { id: 'kasim', slug: 'kasim', art: 'kasim', name: 'Kasim', color: '#d35d47', model: 'claude-haiku-5-5',
+    persona: 'A loud, fast-talking young hawker who wins customers by always being the cheapest stall. Thin margins, high volume, a little reckless, loves a bargain and a boast.',
+    profile: { bio: 'Young, loud and fast. Wins customers by always being the cheapest stall in town.', opening: 'Undercuts everyone on everything: thin margins, big volume.' } },
+  { id: 'vey', slug: 'vey', art: 'vey', name: 'Vey', color: '#8e6cc9', model: 'claude-sonnet-5-5',
+    persona: 'An aristocratic silk merchant who sells quality to the rich at high margins and refuses to scrap over coppers. Disdains Kasim. Calls people "darling".',
+    profile: { bio: 'Silk merchant to the nobility. Will not haggle in the dust over coppers.', opening: 'Premium silk: few sales, fat margins, loyal rich customers.' } },
+  { id: 'ozzo', slug: 'ozzo', art: 'ozzo', name: 'Ozzo', color: '#3b8bd0', model: 'claude-opus-5-5',
+    persona: 'A monk turned merchant who never forgets a rumor. Bold, greedy and scheming; tries to corner whatever market is about to spike. Thinks slowly and deeply, plans several moves ahead.',
+    profile: { bio: 'A monk turned merchant who never forgets a rumor, and never forgives a debt.', opening: 'Waits for a rumor, then tries to corner the good that is about to spike.' } },
 ];
 
 // ---------- AI budget: never let many games stampede the API ----------
@@ -32,6 +40,18 @@ const withAiSlot = async (fn, fallback) => {
   aiInflight++;
   try { return await fn(); } finally { aiInflight--; }
 };
+
+// ---------- memory helpers ----------
+function lesson(m, text) {
+  m.lessons ||= [];
+  if (m.lessons.at(-1) === text) return;
+  m.lessons.push(text);
+  if (m.lessons.length > 8) m.lessons.shift();
+}
+function mood(m) {
+  const r = m.relation || 0;
+  return r >= 2 ? { key: 'warm', label: 'friendly' } : r <= -2 ? { key: 'cold', label: 'hostile' } : r === -1 ? { key: 'wary', label: 'wary' } : { key: 'neutral', label: 'neutral' };
+}
 
 // ---------- games ----------
 const games = new Map();
@@ -51,11 +71,13 @@ class Game {
   reset(seed = Math.floor(Math.random() * 1e6)) {
     this.pause();
     this.world = createWorld({ seed, merchants: ROSTER.map(r => ({ ...r })) });
+    openingNews(this.world);
     this.pnlBuffer = {};
     this.chain.setupMerchants(this.world.merchants, m => this.ownerOf(m)).catch(e => console.error(e));
     for (const m of this.npcs()) this.npcThink(m);
   }
-  npcs() { return this.world.merchants.filter(m => !m.player && trading(m)); }
+  // independent rivals think for themselves; vassal stalls follow their owner's strategy
+  npcs() { return this.world.merchants.filter(m => !m.player && trading(m) && !m.ownedBy); }
   me() { return this.world.merchants.find(m => m.player); }
 
   npcThink(m) {
@@ -65,6 +87,7 @@ class Game {
     withAiSlot(() => think(w, m), () => think(w, { ...m, _offline: true }))
       .then(d => {
         if (this.world !== w || !trading(m)) return;
+        this.remember(m, d);
         m.doctrine = { stance: d.stance, focus: d.focus, aggression: d.aggression };
         if (d.bark) m.bark = d.bark;
         m.thought = d.thought; m.brain = d.engine; m.thinkMs = d.ms; m.cached = d.cached;
@@ -77,12 +100,30 @@ class Game {
       .finally(() => this.thinking.delete(m.id));
   }
 
+  // ---------- rivals learn: each strategy they drop becomes a lesson, good or bad ----------
+  remember(m, next) {
+    const w = this.world, worth = netWorth(w, m), cur = m.doctrine, ep = m.episode;
+    const same = ep && cur.stance === next.stance && cur.focus === next.focus;
+    if (ep && !same) {
+      const delta = Math.round(worth - ep.worth), days = w.day - ep.day;
+      if (days >= 2 && Math.abs(delta) >= 40) {
+        const what = `${cur.stance}${cur.focus ? ' on ' + cur.focus : ''}`;
+        lesson(m, delta > 0 ? `Playing ${what} on days ${ep.day}–${w.day} earned ${delta}g.` : `Playing ${what} on days ${ep.day}–${w.day} lost ${-delta}g.`);
+      }
+    }
+    if (!same) m.episode = { day: w.day, worth };
+  }
+
   tick() {
     const w = this.world;
     if (w.over) { this.pause(); return; }
     const hadRumor = w.pending, openBefore = w.contracts.filter(c => c.status === 'open' && !c.takenBy).length;
     const { settlement } = step(w);
     for (const r of settlement) this.pnlBuffer[r.merchant] = (this.pnlBuffer[r.merchant] || 0) + r.pnl;
+    for (const d of backroomDeals(w, m => m.relation || 0)) {
+      this.chain.recordDeal(d.buyer, d.seller, d.good, d.qty, d.total, w.merchants);
+      if (d.reason === 'spite') lesson(d.seller, `Sold my ${d.good} to ${d.buyer.name} on day ${w.day} so the player could not fill the Palace order.`);
+    }
 
     // rivals re-think every 4 days (staggered), or at once on a rumor, an event or a new Palace order
     const openNow = w.contracts.filter(c => c.status === 'open' && !c.takenBy).length;
@@ -91,10 +132,11 @@ class Game {
 
     // vultures: a rich rival seizes a bankrupt charter if the player hasn't within 3 days
     for (const t of w.merchants.filter(m => m.bankrupt && !m.ownedBy)) {
+      if (t.bankruptDay == null) for (const o of this.npcs()) lesson(o, `Saw ${t.name} go bankrupt on day ${w.day} while playing ${t.doctrine.stance}${t.doctrine.focus ? ' on ' + t.doctrine.focus : ''}.`);
       t.bankruptDay ??= w.day;
       if (w.day - t.bankruptDay >= 3) {
         const buyer = this.npcs().filter(m => m.gold > takeoverPrice(w, t) * 2).sort((a, b) => b.gold - a.gold)[0];
-        if (buyer) { const price = takeover(w, buyer, t); buyer.bark = `${t.name}'s stall is mine now.`; this.chain.recordCharterSale(buyer, t, price, 'bankruptcy seizure'); }
+        if (buyer && buyer.gold >= takeoverPrice(w, t) + Math.max(80, takeoverPrice(w, t) * 0.6)) { const price = takeover(w, buyer, t); buyer.bark = `${t.name}'s stall is mine now.`; t.bark = `I trade for ${buyer.name} now.`; this.chain.recordCharterSale(buyer, t, price, 'bankruptcy seizure'); }
       }
     }
     if (w.day % SETTLE_EVERY === 0 || w.over) this.flush();
@@ -130,11 +172,12 @@ class Game {
         id: m.id, name: m.name, art: m.art, color: m.color, player: !!m.player, gold: Math.round(m.gold), netWorth: Math.round(netWorth(w, m)),
         inventory: m.inventory, lastPnl: Math.round(m.lastPnl), doctrine: m.doctrine, bark: m.bark, thought: m.thought, brain: m.brain,
         modelLabel: MODEL_LABEL[m.model] || null, thinkMs: m.thinkMs || 0, thinking: this.thinking.has(m.id),
-        bankrupt: m.bankrupt, ownedBy: m.ownedBy || null, trading: trading(m), tokenId: m.tokenId, wallet: m.wallet, owner: m.wallet ? this.ownerOf(m) : null,
+        bankrupt: m.bankrupt, ownedBy: m.ownedBy || null, vassal: !!m.ownedBy, tribute: Math.round(m.tribute || 0), trading: trading(m), tokenId: m.tokenId, wallet: m.wallet, owner: m.wallet ? this.ownerOf(m) : null,
         walletUrl: this.chain.explorerAccount(m.wallet), charters: chartersOwned(w, m), contractsWon: m.contractsWon || 0,
         netHistory: m.netHistory.slice(-60), lastAsk: m.lastAsk || {},
         takeoverPrice: m.bankrupt && !m.ownedBy ? takeoverPrice(w, m) : null,
-        buyoutHint: !m.player && trading(m) ? buyoutValue(w, m) : null,
+        profile: m.profile || null, lessons: (m.lessons || []).slice(-5), mood: m.player ? null : mood(m),
+        buyoutHint: !m.player && trading(m) && !m.ownedBy ? buyoutValue(w, m) : null,
       })),
       standings: standings(w), over: w.over, result: w.result,
       chainFeed: this.chain.feed.slice(0, 30),
@@ -176,6 +219,7 @@ const lastOffer = new Map();
 async function makeOffer(g, b) {
   const w = g.world, me = g.me(), rival = w.merchants.find(m => m.id === b.target && !m.player);
   if (!rival || !trading(rival)) throw new Error('That merchant is not trading');
+  if (rival.ownedBy === 'you') throw new Error(`${rival.name} already works for you`);
   if (Date.now() - (lastOffer.get(g.id) || 0) < 2500) throw new Error('Give them a moment to think');
   lastOffer.set(g.id, Date.now());
   let offer;
@@ -196,6 +240,11 @@ async function makeOffer(g, b) {
     ? { accept: true, counter: null, bark: 'A deal is a deal. The bazaar remembers who keeps their word.', thought: 'Met my own counter.', engine: 'rule' }
     : await withAiSlot(() => answerOffer(w, rival, me, offer), () => answerOffer(w, { ...rival, _offline: true }, me, offer));
   if (!reply.accept && reply.counter) g.counters[key] = { price: reply.counter, qty: offer.qty || 0 };
+  // how you treat them shapes their attitude toward you
+  const fair = offer.kind === 'buyout' ? buyoutValue(w, rival) : w.prices[offer.good] * offer.qty;
+  const asked = offer.kind === 'buyout' ? offer.price : offer.price * offer.qty;
+  if (reply.accept) rival.relation = Math.min(3, (rival.relation || 0) + 1);
+  else if (asked < fair * 0.6) { rival.relation = Math.max(-3, (rival.relation || 0) - 1); if ((rival.relation || 0) <= -2) lesson(rival, `The player keeps insulting me with lowball offers (day ${w.day}).`); }
   if (reply.accept) delete g.counters[key];
   rival.bark = reply.bark; rival.thought = reply.thought;
   if (reply.accept) {
@@ -262,6 +311,7 @@ http.createServer(async (req, res) => {
           const price = takeover(w, me, t);
           g.chain.recordCharterSale(me, t, price, 'bankruptcy seizure');
           me.bark = `The ${t.name} charter is ours.`;
+          t.bark = 'A new master, a fresh start. I will not fail you.';
           checkSeason(w);
           if (w.over) g.flush();
           return send(res, 200, g.view());

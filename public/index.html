@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bazaar Sovereign</title>
   <meta name="description" content="A living bazaar where every merchant is an NFT that owns its own NEAR wallet, and AI minds run the rivals." />
+  <meta property="og:title" content="Bazaar Sovereign" />
+  <meta property="og:description" content="Out-trade four AI merchants. Every merchant is an NFT that owns its own NEAR wallet." />
+  <meta property="og:image" content="/art/bazaar.webp" />
   <link rel="icon" href="/art/saffron.webp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -17,33 +20,37 @@
       <span class="tag">every merchant is an NFT that owns its own NEAR wallet</span>
     </div>
     <div class="clock">
-      <div class="day">Day <b id="day">0</b></div>
+      <div class="day">Day <b id="day">0</b><small> / <span id="seasonDays">30</span></small></div>
+      <div class="season"><i id="seasonBar"></i></div>
       <div id="events" class="events"></div>
     </div>
     <div class="controls">
       <button id="play" class="primary">▶ Open the bazaar</button>
       <button id="speed" class="ghost" title="Speed">1×</button>
-      <button id="sim" class="ghost" title="Fast-forward 30 days">⏩ 30 days</button>
-      <button id="reset" class="ghost" title="New game">↺</button>
-      <a id="chainBadge" class="chain" target="_blank" rel="noopener">chain…</a>
+      <button id="sim" class="ghost" title="Skip ahead 10 days">⏩ 10 days</button>
+      <button id="help" class="ghost" title="Who is who in the bazaar">Rivals</button>
+      <button id="reset" class="ghost" title="New season">↺</button>
     </div>
   </header>
 
+  <div id="tableBanner" class="table-banner" hidden></div>
+
   <section class="stage">
     <div class="rumor" id="rumor" hidden></div>
+    <div class="palace" id="palace" hidden></div>
     <div class="stalls" id="stalls"></div>
   </section>
 
   <main class="grid">
     <section class="panel market">
-      <h2>Market board</h2>
+      <h2>Market board <small>tap a rival's stall to trade with them</small></h2>
       <div id="goods" class="goods"></div>
     </section>
 
     <section class="panel house">
       <h2>Your House <small id="houseCharter"></small></h2>
       <form id="orderForm" class="order">
-        <input id="order" autocomplete="off" placeholder="Give your factor an order… e.g. “Drought is coming — corner the saffron”" />
+        <input id="order" autocomplete="off" maxlength="300" placeholder="Give your factor an order… e.g. “Drought is coming — corner the saffron”" />
         <button class="primary" id="orderBtn">Send</button>
       </form>
       <div id="reply" class="reply" hidden></div>
@@ -53,7 +60,7 @@
         <label class="grow">Aggression <input id="aggr" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
       </div>
       <div class="hint" id="stanceHint"></div>
-      <canvas id="race" height="150"></canvas>
+      <canvas id="race" height="140"></canvas>
       <div class="legend" id="legend"></div>
     </section>
 
@@ -63,22 +70,73 @@
         <ol id="news"></ol>
       </div>
       <div class="feed">
-        <h2>On-chain <small id="chainNote"></small></h2>
+        <h2>On NEAR <small id="chainNote"></small></h2>
         <ol id="ledger"></ol>
       </div>
     </section>
   </main>
 
+  <footer class="foot" id="foot"></footer>
+
+  <!-- trade with a rival -->
+  <dialog id="deal">
+    <div class="deal-head">
+      <div class="portrait big" id="dealPortrait"></div>
+      <div>
+        <h2 id="dealName">Rival</h2>
+        <div class="muted" id="dealMeta"></div>
+      </div>
+      <form method="dialog"><button class="ghost close" aria-label="Close">✕</button></form>
+    </div>
+    <div class="tabs">
+      <button type="button" data-tab="goods" class="on">Buy their goods</button>
+      <button type="button" data-tab="buyout">Buy their whole house</button>
+    </div>
+    <form id="dealGoods" class="deal-form">
+      <label>Good <select id="dGood"></select></label>
+      <label>Quantity <input id="dQty" type="number" min="1" step="1" value="5" /></label>
+      <label>Price each <input id="dPrice" type="number" min="0.1" step="0.1" /></label>
+      <div class="muted" id="dTotal"></div>
+      <button class="primary">Make the offer</button>
+    </form>
+    <form id="dealBuyout" class="deal-form" hidden>
+      <p class="muted">If they accept, they retire: their charter NFT, stock and till become yours. Hold three charters to be crowned Sovereign.</p>
+      <label>Total price <input id="bPrice" type="number" min="1" step="1" /></label>
+      <div class="muted" id="bHint"></div>
+      <button class="primary">Offer to buy them out</button>
+    </form>
+    <div id="dealReply" class="deal-reply" hidden></div>
+  </dialog>
+
   <dialog id="intro">
     <h2>Welcome to the bazaar</h2>
-    <p>You inherit a merchant charter — an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you.</p>
+    <p>You inherit a merchant charter: an <b>NFT that owns its own NEAR wallet</b>. Four rival merchants, each with its own <b>AI mind</b>, trade saffron, silk, tea and salt against you for 30 days.</p>
     <ul>
-      <li>Every day suppliers auction stock to the highest bidder and townsfolk buy from the cheapest stall.</li>
-      <li>Watch for <b>rumors</b> — droughts, caravans, festivals. Corner a market before it moves.</li>
-      <li>Merchants who run out of gold go <b>bankrupt</b>. Buy their charter and their whole business — NFT, wallet, stock — becomes yours.</li>
+      <li><b>Rumors</b> warn of droughts, caravans and festivals a day early. Corner a market before it moves.</li>
+      <li><b>Palace orders</b> pay double. Claim one, then buy up the good to deliver it.</li>
+      <li><b>Haggle</b>: tap a rival to buy their stock or offer to buy out their whole house.</li>
+      <li>Rivals who run out of gold go <b>bankrupt</b>. Seize their charter, or buy out a rival outright, and their stall becomes your <b>vassal</b>: it keeps trading under your strategy and pays you 20% of its profit.</li>
     </ul>
-    <p class="muted">Profits and losses settle as real NEAR transfers every 5 days. You never need a wallet to play.</p>
+    <p><b>Win:</b> be the richest house (vassals included) on day 30 — or hold <b>three charters</b> and be crowned Sovereign at once.</p>
+    <p class="muted">Every 5 days profits, stock and charters settle on NEAR. You never need a wallet to play.</p>
     <form method="dialog"><button class="primary">Enter the bazaar</button></form>
+  </dialog>
+
+  <dialog id="rivals">
+    <div class="deal-head"><h2>Who's who in the bazaar</h2><form method="dialog"><button class="ghost close" aria-label="Close">✕</button></form></div>
+    <p class="muted">Every rival has its own mind, its own wallet and its own memory. They start the season with a temperament, then learn from what works, what burns them, and how you treat them.</p>
+    <div id="rivalList"></div>
+  </dialog>
+
+  <dialog id="end">
+    <h2 id="endTitle">The season ends</h2>
+    <p id="endText"></p>
+    <table class="standings" id="endTable"></table>
+    <div id="endProof" class="muted"></div>
+    <div class="end-actions">
+      <button class="primary" id="again">Play another season</button>
+      <form method="dialog"><button class="ghost">Look around</button></form>
+    </div>
   </dialog>
 
   <script src="/game.js"></script>

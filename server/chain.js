@@ -97,7 +97,7 @@ export function makeChain(live) {
     const bal = await acct(m.wallet).getBalance();
     if (bal >= need) return;
     const r = await send(TREASURY, m.wallet, need - bal + nearToYocto('0.02'));
-    push('loan', `Treasury advanced working capital to ${m.name}`, hashOf(r));
+    push('loan', `The treasury advances ${m.player ? 'you' : m.name} a little working capital.`, hashOf(r));
   }
 
   const holdings = merchants => merchants.flatMap(m => GOODS.map(g => ({ account_id: m.wallet, token_id: g, amount: String(Math.max(0, Math.floor(m.inventory[g]))) })));
@@ -112,20 +112,20 @@ export function makeChain(live) {
     async setupMerchants(merchants, ownerOf) {
       for (const m of merchants) { m.wallet = walletOf(m.slug); m.tokenId = `charter-${m.slug}`; }
       if (!live) {
-        for (const m of merchants) push('mint', `Charter ${m.tokenId} minted → ${m.wallet}`, mockHash());
+        for (const m of merchants) push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, mockHash());
         return;
       }
       await enqueue(ROOT, 'treasury', async () => {
         if (!(await exists(TREASURY))) {
           const r = await root.createSubAccount({ accountOrPrefix: 'treasury', publicKey: pubKey, nearToTransfer: nearToYocto(process.env.TREASURY_SEED_NEAR || '2.5') });
-          push('wallet', `Opened the town treasury ${TREASURY}`, hashOf(r));
+          push('wallet', 'The town treasury opens its vault.', hashOf(r));
         }
       });
       for (const m of merchants) {
         await enqueue(ROOT, `wallet ${m.wallet}`, async () => {
           if (!(await exists(m.wallet))) {
             const r = await root.createSubAccount({ accountOrPrefix: m.slug, publicKey: pubKey, nearToTransfer: nearToYocto(SEED_NEAR) });
-            push('wallet', `Opened ${m.name}'s wallet ${m.wallet}`, hashOf(r));
+            push('wallet', `${m.player ? 'Your stall' : m.name + "'s stall"} gets its own NEAR wallet.`, hashOf(r));
           }
         });
         await enqueue(ROOT, `charter ${m.tokenId}`, async () => {
@@ -133,18 +133,18 @@ export function makeChain(live) {
           if (existing) {
             if (existing.owner_id !== ownerOf(m)) {
               const r = await call(existing.owner_id, 'nft_transfer', { receiver_id: ownerOf(m), token_id: m.tokenId, memo: 'New season: the charter returns to its merchant' }, { deposit: 1n, gas: 50 });
-              push('transfer', `New season: ${m.tokenId} returned to ${ownerOf(m)}`, hashOf(r));
+              push('transfer', `New season: ${m.player ? 'your' : m.name + "'s"} charter returns to its own stall.`, hashOf(r));
             }
             return;
           }
           const r = await call(ROOT, 'mint_charter', { token_id: m.tokenId, owner_id: ownerOf(m), name: m.name, wallet: m.wallet, persona: m.persona, media: `${PUBLIC_URL}/art/${m.art || m.slug}.webp` }, { deposit: nearToYocto('0.02') });
-          push('mint', `Minted ${m.name}'s charter NFT → owned by ${ownerOf(m)}`, hashOf(r));
+          push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, hashOf(r));
         });
       }
       // a new season starts with empty warehouses
       enqueue(ROOT, 'reset goods', async () => {
         const r = await call(ROOT, 'sync_goods', { holdings: holdings(merchants) }, { gas: 200 });
-        push('goods', 'New season: all merchant warehouses emptied (NEP-245 balances reset)', hashOf(r));
+        push('goods', 'New season: every warehouse starts empty.', hashOf(r));
       });
     },
 
@@ -155,26 +155,26 @@ export function makeChain(live) {
         const m = byId[merchant];
         if (!m || Math.abs(pnl) * GOLD_TO_NEAR < 0.00001) continue;
         const [from, to] = pnl > 0 ? [TREASURY, m.wallet] : [m.wallet, TREASURY];
-        const text = `Day ${day} · ${m.name} ${pnl > 0 ? 'earned' : 'lost'} ${Math.abs(pnl).toFixed(0)}g → ${fmtNear(Math.abs(pnl))} NEAR ${pnl > 0 ? 'treasury → ' + m.slug : m.slug + ' → treasury'}`;
+        const text = `${m.player ? 'You' : m.name} ${pnl > 0 ? 'earned' : 'lost'} ${Math.abs(pnl).toFixed(0)}g over days ${Math.max(1, day - 4)}–${day}, paid ${pnl > 0 ? 'out by' : 'in to'} the treasury.`;
         if (!live) { push('settle', text, mockHash()); continue; }
         enqueue(from, `settle ${m.slug}`, async () => {
           if (pnl < 0) await ensureFunds(m, -pnl);
           push('settle', text, hashOf(await send(from, to, yocto(Math.abs(pnl)))));
         });
       }
-      const goodsText = `Day ${day} · warehouses mirrored on-chain (NEP-245 saffron/silk/tea/salt)`;
-      const nftText = `Day ${day} · charters updated (net worth, stance, bankruptcy in NFT metadata)`;
+      const goodsText = `Day ${day}: every stall's stock of saffron, silk, tea and salt is recorded on-chain.`;
+      const nftText = `Day ${day}: each charter NFT is updated with its house's net worth and strategy.`;
       if (!live) { push('goods', goodsText, mockHash()); push('update', nftText, mockHash()); return; }
       enqueue(ROOT, 'sync goods', async () => push('goods', goodsText, hashOf(await call(ROOT, 'sync_goods', { holdings: holdings(merchants) }, { gas: 200 }))));
       enqueue(ROOT, 'update charters', async () => push('update', nftText, hashOf(await call(ROOT, 'update_charters', {
-        day, updates: merchants.map(m => ({ token_id: m.tokenId, net_worth: Math.round(worth(m)), gold: Math.round(m.gold), stance: m.ownedBy ? 'acquired' : m.doctrine.stance + (m.doctrine.focus ? `:${m.doctrine.focus}` : ''), bankrupt: m.bankrupt })),
+        day, updates: merchants.map(m => ({ token_id: m.tokenId, net_worth: Math.round(worth(m)), gold: Math.round(m.gold), stance: (m.ownedBy ? `vassal of ${m.ownedBy} · ` : '') + m.doctrine.stance + (m.doctrine.focus ? `:${m.doctrine.focus}` : ''), bankrupt: m.bankrupt })),
       }, { gas: 150 }))));
     },
 
     // goods deal between houses: seller's wallet signs mt_transfer, buyer's wallet pays the seller
     recordDeal(buyer, seller, good, qty, total, merchants) {
-      const text = `${seller.name}'s wallet sent ${qty} ${good} (NEP-245) to ${buyer.name}`;
-      const payText = `${buyer.name}'s wallet paid ${seller.name} ${Math.round(total)}g (${fmtNear(total)} NEAR)`;
+      const text = `${seller.name}'s stall hands over ${qty} ${good}, signed by its own wallet.`;
+      const payText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)}g, wallet to wallet.`;
       if (!live) { push('deal', text, mockHash()); push('pay', payText, mockHash()); return; }
       // the Vizier first mirrors the seller's pre-deal stock so the on-chain balance exists
       const pre = merchants.filter(m => m === buyer || m === seller).map(m => ({ account_id: m.wallet, token_id: good, amount: String(Math.floor(m.inventory[good] + (m === seller ? qty : -qty))) }));
@@ -185,12 +185,12 @@ export function makeChain(live) {
 
     // charter sale: Vizier lists it, then the buyer's own wallet buys it with the price attached
     recordCharterSale(buyer, target, price, reason) {
-      const text = `${buyer.name}'s wallet bought ${target.name}'s charter NFT for ${fmtNear(price)} NEAR (${reason})`;
-      if (!live) { push('listed', `${target.name}'s charter listed for ${Math.round(price)}g (${reason})`, mockHash()); push('takeover', text, mockHash()); return; }
+      const text = `${buyer.player ? 'You buy' : buyer.name + ' buys'} ${target.name}'s charter for ${Math.round(price)}g. The NFT moves to the buyer's stall.`;
+      if (!live) { push('listed', `${target.name}'s charter is put up for sale (${reason}).`, mockHash()); push('takeover', text, mockHash()); return; }
       const deposit = yocto(price);
       enqueue(ROOT, 'list charter', async () => {
         if (target.bankrupt) await call(ROOT, 'update_charters', { day: target.bankruptDay || 0, updates: [{ token_id: target.tokenId, net_worth: Math.round(target.gold), gold: Math.round(target.gold), stance: 'bankrupt', bankrupt: true }] });
-        push('listed', `Vizier listed ${target.name}'s charter for ${fmtNear(price)} NEAR (${reason})`, hashOf(await call(ROOT, 'list_charter', { token_id: target.tokenId, price: deposit.toString(), reason })));
+        push('listed', `${target.name}'s charter is put up for sale (${reason}).`, hashOf(await call(ROOT, 'list_charter', { token_id: target.tokenId, price: deposit.toString(), reason })));
       }).then(() => enqueue(buyer.wallet, 'buy charter', async () => {
         await ensureFunds(buyer, price);
         push('takeover', text, hashOf(await call(buyer.wallet, 'buy_charter', { token_id: target.tokenId, buyer_token_id: buyer.tokenId }, { deposit, gas: 100 })));

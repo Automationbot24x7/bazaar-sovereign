@@ -104,6 +104,8 @@ You may counter with a price. Stay in character: haggling is part of the bazaar.
 A bankrupt house's charter can be bought by a solvent rival. The buyer pays the takeover price (about half the stock value, minus debts) and absorbs all the bankrupt house's stock. If the player doesn't buy within three days, the richest rival with enough gold usually does. Taking over a fallen rival is a strong move; going bankrupt ends your story.
 
 ## 8. How to think
+- Your market report includes **lessonsFromThisSeason**: what your earlier strategies earned or lost, and what you saw happen to others. Learn from them: repeat what worked, avoid what burned you, and let your temperament shift as the season teaches you. A merchant who has been burned twice should be visibly warier; one on a winning streak may grow bolder.
+- **attitudeToPlayer** runs from -3 (hostile) to +3 (friendly) and reflects how the player has treated you. Let it colour your barks and your willingness to deal with them.
 - Read the rumor first. It is the most valuable information in the report.
 - Check rivals' doctrines: if someone is already cornering a good, fighting them for it often bankrupts both. If two rivals are undercutting each other, a premium or hoard stance can wait them out.
 - Watch your own gold. Below ~80 gold you cannot win auctions; below ~40 consider liquidating.
@@ -129,7 +131,7 @@ function snapshot(w, me) {
     rumor: w.pending ? w.pending.rumor : null,
     seasonDaysLeft: SEASON_DAYS - w.day,
     palaceOrders: w.contracts.filter(c => c.status === 'open').map(c => ({ id: c.id, good: c.good, qty: c.qty, reward: c.reward, dueDay: c.due, claimedBy: c.takenBy ? (w.merchants.find(m => m.id === c.takenBy)?.name) : null })),
-    me: { gold: me.gold, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine },
+    me: { gold: me.gold, inventory: me.inventory, avgCost: me.cost, lastPnl: me.lastPnl, doctrine: me.doctrine, lessonsFromThisSeason: me.lessons || [], attitudeToPlayer: me.player ? undefined : (me.relation || 0) },
     rivals: w.merchants.filter(m => m !== me).map(m => ({
       name: m.name, bankrupt: m.bankrupt, doctrine: m.doctrine.stance + (m.doctrine.focus ? `:${m.doctrine.focus}` : ''),
       netWorth: Math.round(netWorth(w, m)), stock: m.inventory, lastAsk: m.lastAsk, lastBark: m.bark,
@@ -218,10 +220,12 @@ export async function answerOffer(w, rival, player, offer) {
   const desc = offer.kind === 'buyout'
     ? `${player.name} offers to buy your entire house (charter, stock and till) for ${offer.price} gold in total. Your net worth is about ${value} gold. If you accept you retire from the bazaar for good.`
     : `${player.name} offers to buy ${offer.qty} ${offer.good} from you at ${offer.price} gold each (${Math.round(offer.qty * offer.price)} total). The market price is ${w.prices[offer.good]}.`;
+  const need = w.contracts.find(c => c.status === 'open' && c.takenBy === player.id);
+  const history = ` Your attitude to the player is ${rival.relation || 0} on a -3 (hostile) to +3 (friendly) scale.${need ? ` The player has claimed the Palace order for ${need.qty} ${need.good} due day ${need.due}; selling them ${need.good} helps them win it.` : ''}`;
   if (aiOn() && !rival._offline) {
     const role = `## Your role\nYou are **${rival.name}**. Personality: ${rival.persona}\nA rival house has made you a direct offer. Answer it in character with respond_to_offer.`;
     try {
-      const { out: d, ms } = await callClaude(model, role, `Call respond_to_offer. Offer: ${desc}\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, rival))}`, OFFER_TOOL);
+      const { out: d, ms } = await callClaude(model, role, `Call respond_to_offer. Offer: ${desc}${history}\nMarket report (day ${w.day}):\n${JSON.stringify(snapshot(w, rival))}`, OFFER_TOOL);
       return { accept: !!d.accept, counter: Number.isFinite(d.counter_price) ? Math.round(d.counter_price * 100) / 100 : null, bark: String(d.bark || '').slice(0, 160), thought: String(d.thought || '').slice(0, 220), ms, engine: 'claude' };
     } catch (e) { console.warn(`Claude unavailable for offer to ${rival.name}: ${e.message.slice(0, 80)}`); }
   }

@@ -4,7 +4,8 @@
   "description": "A living bazaar where every merchant is an NFT that owns its own NEAR wallet, and AI minds run the rivals.",
   "type": "module",
   "scripts": {
-    "start": "node --env-file-if-exists=.env server/index.js"
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "test": "node --test test/"
   },
   "engines": {
     "node": ">=22"

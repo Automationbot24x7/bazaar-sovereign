@@ -49,7 +49,12 @@ export function createWorld({ seed = 7, merchants }) {
   };
 }
 
-export const trading = m => !m.bankrupt && !m.ownedBy;
+export function openingNews(w) {
+  log(w, 'The bazaar opens. Four rival houses set out their stalls, and the Palace is watching.', 'event');
+}
+
+export const TRIBUTE = 0.2; // a vassal stall sends this share of each day's profit to its owner
+export const trading = m => !m.bankrupt; // vassal stalls keep trading under their owner
 export const log = (w, text, kind = 'info') => { w.news.unshift({ day: w.day, text, kind }); w.news.length = Math.min(w.news.length, 60); };
 
 export function netWorth(w, m) {
@@ -165,6 +170,7 @@ export function step(w) {
     w.pending = e;
     log(w, `Rumor: ${e.rumor}`, 'rumor');
   }
+  for (const v of w.merchants.filter(m => m.ownedBy && trading(m))) { const o = w.merchants.find(x => x.id === v.ownedBy); if (o) v.doctrine = { ...o.doctrine }; }
   const { sup, dem, rent } = modifiers(w);
   const alive = w.merchants.filter(trading);
   const pnl = Object.fromEntries(w.merchants.map(m => [m.id, 0]));
@@ -240,6 +246,10 @@ export function step(w) {
       const q = Math.min(need, m.inventory[g.id]);
       if (q) { m.inventory[g.id] -= q; m.gold += q * g.base * 0.45; pnl[m.id] += q * g.base * 0.45; log(w, `${m.name} pawned ${q} ${g.name} to cover debts.`, 'warn'); }
     }
+    if (m.ownedBy && pnl[m.id] > 0 && m.gold > 0) {
+      const o = w.merchants.find(x => x.id === m.ownedBy), t = +(pnl[m.id] * TRIBUTE).toFixed(2);
+      m.gold -= t; pnl[m.id] -= t; o.gold += t; pnl[o.id] += t; o.tribute = (o.tribute || 0) + t;
+    }
     m.lastPnl = +pnl[m.id].toFixed(2);
     m.gold = +m.gold.toFixed(2);
     if (m.gold < 0) {
@@ -268,15 +278,11 @@ export function takeoverPrice(w, target) {
 export function takeover(w, buyer, target) {
   const price = takeoverPrice(w, target);
   if (!target.bankrupt || target.ownedBy) throw new Error('Only unclaimed bankrupt charters can be taken over');
-  if (buyer.gold < price) throw new Error(`Need ${price} gold`);
-  buyer.gold -= price;
-  for (const g of GOODS) {
-    const q = target.inventory[g.id];
-    if (q) { buyer.cost[g.id] = (buyer.cost[g.id] * buyer.inventory[g.id] + target.cost[g.id] * q) / (buyer.inventory[g.id] + q); buyer.inventory[g.id] += q; target.inventory[g.id] = 0; }
-  }
-  target.gold = 0;
-  target.ownedBy = buyer.id;
-  log(w, `${buyer.name} bought ${target.name}'s charter for ${price} gold and absorbed the stall.`, 'takeover');
+  const capital = Math.round(Math.max(80, price * 0.6)); // the new owner reopens the stall with working capital
+  if (buyer.gold < price + capital) throw new Error(`You need ${Math.round(price + capital)} gold (${price} for the charter, ${capital} to reopen the stall)`);
+  buyer.gold -= price + capital;
+  target.gold = capital; target.bankrupt = false; target.ownedBy = buyer.id; target.vassalSince = w.day;
+  log(w, `${buyer.name} seized ${target.name}'s charter. The stall reopens as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
   return price;
 }
 
@@ -285,7 +291,7 @@ export const chartersOwned = (w, m) => 1 + w.merchants.filter(x => x.ownedBy ===
 
 export function standings(w) {
   return w.merchants
-    .map(m => ({ id: m.id, name: m.name, netWorth: Math.round(netWorth(w, m)), charters: chartersOwned(w, m), out: !trading(m), contracts: m.contractsWon || 0 }))
+    .map(m => ({ id: m.id, name: m.name, netWorth: Math.round(netWorth(w, m) + w.merchants.filter(v => v.ownedBy === m.id).reduce((t, v) => t + Math.max(0, netWorth(w, v)), 0)), charters: chartersOwned(w, m), out: !trading(m) || !!m.ownedBy, vassalOf: m.ownedBy || null, contracts: m.contractsWon || 0 }))
     .sort((a, b) => (a.out - b.out) || b.netWorth - a.netWorth);
 }
 
@@ -324,12 +330,47 @@ export function buyoutValue(w, target) {
 export function executeBuyout(w, buyer, target, price) {
   if (!trading(target)) throw new Error(`${target.name} is not trading`);
   if (buyer.gold < price) throw new Error(`You need ${price} gold`);
+  if (target.ownedBy) throw new Error(`${target.name} already serves another house`);
   buyer.gold -= price;
-  buyer.gold += target.gold;
-  for (const g of GOODS) {
-    const q = target.inventory[g.id];
-    if (q) { buyer.cost[g.id] = (buyer.cost[g.id] * buyer.inventory[g.id] + target.cost[g.id] * q) / (buyer.inventory[g.id] + q); buyer.inventory[g.id] += q; target.inventory[g.id] = 0; }
+  target.ownedBy = buyer.id; target.soldFor = price; target.vassalSince = w.day;
+  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} gold. The stall now trades as ${buyer.player ? 'your' : buyer.name + "'s"} vassal and pays ${Math.round(TRIBUTE * 100)}% of its profit.`, 'takeover');
+}
+
+// ---------- back-room deals between rivals ----------
+// Rivals trade with each other: to fill Palace orders they claimed, or out of spite to
+// keep goods away from a player they resent. Returns the deals so the caller can put
+// them on-chain (seller's wallet signs the goods transfer, buyer's wallet pays).
+export function backroomDeals(w, relationToPlayer) {
+  const deals = [];
+  const npc = w.merchants.filter(m => !m.player && trading(m) && !m.ownedBy);
+  const spare = (m, g) => Math.max(0, m.inventory[g] - reserved(w, m, g));
+  const deal = (buyer, seller, good, qty, price, reason, bark) => {
+    const total = Math.round(qty * price);
+    if (qty < 1 || buyer.gold - total < RENT * 3) return false;
+    buyer.gold -= total; seller.gold += total;
+    buyer.cost[good] = (buyer.cost[good] * buyer.inventory[good] + price * qty) / (buyer.inventory[good] + qty);
+    buyer.inventory[good] += qty; seller.inventory[good] -= qty;
+    seller.bark = bark;
+    log(w, `${seller.name} sold ${qty} ${G[good].name} to ${buyer.name}${reason === 'spite' ? ' — to keep it out of your hands' : ' to help fill a Palace order'}.`, 'deal');
+    deals.push({ buyer, seller, good, qty, total, reason });
+    return true;
+  };
+  for (const c of w.contracts.filter(c => c.status === 'open' && c.takenBy)) {
+    const taker = w.merchants.find(m => m.id === c.takenBy);
+    // a rival short on its Palace order buys from the others as the deadline nears
+    if (!taker.player && c.due - w.day <= 3) {
+      const short = c.qty - taker.inventory[c.good];
+      const seller = short > 0 && npc.filter(m => m !== taker && spare(m, c.good) > 0).sort((a, b) => spare(b, c.good) - spare(a, c.good))[0];
+      if (seller) deal(taker, seller, c.good, Math.min(short, spare(seller, c.good)), +(w.prices[c.good] * 1.25).toFixed(2), 'palace', `Take it, ${taker.name}. The Palace pays us both.`);
+    }
+    // rivals who resent the player sell their stock elsewhere to sink the player's order
+    if (taker.player) {
+      c.spited ||= [];
+      for (const y of npc.filter(m => (relationToPlayer(m) <= -2) && spare(m, c.good) >= 3 && !c.spited.includes(m.id))) {
+        const buyer = npc.filter(m => m !== y).sort((a, b) => b.gold - a.gold)[0];
+        if (buyer && deal(buyer, y, c.good, spare(y, c.good), w.prices[c.good], 'spite', `Better in ${buyer.name}'s hands than yours.`)) { c.spited.push(y.id); y.spite = (y.spite || 0) + 1; }
+      }
+    }
   }
-  target.gold = 0; target.ownedBy = buyer.id; target.soldFor = price;
-  log(w, `${target.name} sold their charter to ${buyer.name} for ${price} gold and retired from the bazaar.`, 'takeover');
+  return deals;
 }
