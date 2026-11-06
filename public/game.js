@@ -39,7 +39,7 @@ function stalls() {
         <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>${m.helpers ? ` <span class="perk" title="${m.helpers} hired helper(s), ${m.helperDays} day(s) left">👥${m.helpers}</span>` : ''}${m.awning ? ' <span class="perk" title="Awning: safe from sudden storms">☂</span>' : ''}
         ${S.ai === 'live' && m.modelLabel && !m.vassal ? `<span class="brain" title="${esc(m.player ? 'Your factor' : m.name)} — ${esc(m.modelLabel)}${m.thinkMs ? `, last decision took ${(m.thinkMs / 1000).toFixed(1)}s` : ''}">${m.thinking ? '<i class="dots"></i>' : '✦'} ${esc(m.modelLabel)}${m.thinkMs ? ` · ${(m.thinkMs / 1000).toFixed(1)}s` : ''}</span>` : ''}
       </div>
-      ${m.chips?.length ? `<div class="chips">${m.chips.map(c => `<span class="chip ${c.tone}">${esc(c.text)}</span>`).join('')}</div>` : ''}
+      ${m.chips?.length ? `<div class="chips">${m.chips.map(c => `<span class="chip tone-${c.tone}">${esc(c.text)}</span>`).join('')}</div>` : ''}
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>Charter NFT</span>${m.walletUrl ? `<a href="${m.walletUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="This stall's own NEAR wallet">${esc(m.wallet)} ↗</a>` : `<span title="This stall's own wallet">${esc(m.wallet || '')}</span>`}</div>
       ${m.magnateHeld ? `<div class="owned held">🐫 Charter held by ${esc(S.magnate?.name || 'the Magnate')}</div>` : m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}
@@ -117,9 +117,9 @@ function race() {
 }
 
 function feeds() {
-  $('#news').innerHTML = S.news.map(n => `<li class="${n.kind}"><span class="d">Day ${n.day}</span>${esc(n.text)}</li>`).join('');
+  $('#news').innerHTML = S.news.map(n => `<li class="kind-${n.kind}"><span class="d">Day ${n.day}</span>${esc(n.text)}</li>`).join('');
   $('#ledger').innerHTML = S.chainFeed.length
-    ? S.chainFeed.map(f => `<li class="${f.kind}"><span class="ic">${FEED_ICON[f.kind] || '•'}</span>${esc(f.text)}${f.url ? ` <a href="${f.url}" target="_blank" rel="noopener" title="View the transaction on NearBlocks">tx ↗</a>` : ''}</li>`).join('')
+    ? S.chainFeed.map(f => `<li class="kind-${f.kind}"><span class="ic">${FEED_ICON[f.kind] || '•'}</span>${esc(f.text)}${f.url ? ` <a href="${f.url}" target="_blank" rel="noopener" title="View the transaction on NearBlocks">tx ↗</a>` : ''}</li>`).join('')
     : '<li class="muted">Every 5 days the bazaar settles on NEAR: profits, stock and charters.</li>';
   $('#chainNote').textContent = S.chain.mode === 'testnet' ? (S.chain.pending ? `· ${S.chain.pending} transactions settling…` : '· live on testnet') : '· practice table, simulated';
 }
@@ -210,7 +210,7 @@ function rivals() {
     </div></article>`).join('');
 }
 
-function render(s) { S = s; header(); palace(); stalls(); goods(); race(); feeds(); end(); if (dealWith && $('#deal').open) dealMeta(); if ($('#rivals').open) rivals(); pumpScenes(); }
+function render(s) { S = s; header(); palace(); stalls(); goods(); race(); feeds(); end(); if (dealWith && $('#deal').open) dealMeta(); if ($('#rivals').open) rivals(); pumpScenes(); motion(); }
 const refresh = () => api('/api/state').then(render).catch(() => {});
 
 // ---------- deal drawer ----------
@@ -433,6 +433,7 @@ async function playScene(id) {
     if (token !== sceneToken) return; // skipped
     const line = lines[i], who = SCENES.cast[line.who], text = line.text.replace(/<[^>]+>\s*/g, '');
     $('#scenePortrait').style.backgroundImage = who.art ? `url(/art/${who.art}.webp)` : 'url(/art/ruin.webp)';
+    if ($('#sceneName').textContent !== who.name) pulse($('#scenePortrait'), 'fx-speak'); // a new speaker steps forward
     $('#sceneName').textContent = who.name;
     const p = $('#sceneLine'); p.textContent = '';
     let shown = 0;
@@ -482,3 +483,56 @@ $('#sound').onclick = () => {
 };
 // browsers only allow sound after the player interacts with the page
 addEventListener('pointerdown', () => { if (userActed) return; userActed = true; setTimeout(pumpScenes, 50); }, { capture: true });
+
+// ---------- motion: floating numbers, flashes and pulses on top of the live board ----------
+// The board is re-rendered on every poll, so effects live on their own fixed layer.
+const fxLayer = (() => { const el = document.createElement('div'); el.id = 'fx'; document.body.appendChild(el); return el; })();
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let fxPrev = null;
+function floatAt(el, text, cls, dx = 0) {
+  if (!el || reduceMotion) return;
+  const r = el.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight) return;
+  const f = document.createElement('div');
+  f.className = `fx-float ${cls}`; f.textContent = text;
+  f.style.left = `${r.left + r.width / 2 + dx}px`; f.style.top = `${r.top + Math.min(70, r.height / 3)}px`;
+  fxLayer.appendChild(f);
+  setTimeout(() => f.remove(), 1700);
+}
+function pulse(el, cls) {
+  if (!el || reduceMotion) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+}
+function motion() {
+  if (!S) return;
+  const now = {
+    day: S.day,
+    pnl: Object.fromEntries(S.merchants.map(m => [m.id, m.lastPnl])),
+    owners: Object.fromEntries(S.merchants.map(m => [m.id, `${m.ownedBy || ''}|${m.magnateHeld ? 'M' : ''}|${m.bankrupt ? 'B' : ''}`])),
+    hit: S.magnate?.hits?.[0] ? `${S.magnate.hits[0].day}:${S.magnate.hits[0].by}:${S.magnate.hits[0].hurt}` : '',
+    stage: S.magnate?.stage || '',
+  };
+  if (fxPrev && !S.over) {
+    if (now.day !== fxPrev.day) {
+      pulse($('#day'), 'fx-tick');
+      // each stall's result for the day floats up from its card
+      for (const m of S.merchants) {
+        const v = Math.round(m.lastPnl);
+        if (!v || !m.trading) continue;
+        floatAt(document.querySelector(`.stall[data-id="${m.id}"] .nw`), `${v > 0 ? '+' : '−'}${Math.abs(v)}`, v > 0 ? 'up' : 'down');
+      }
+      // the Magnate's day: red when it cost him patience, green when his monopoly refilled it
+      if (['dumping', 'monopoly'].includes(now.stage) && S.magnate.lastLoss) {
+        floatAt(document.querySelector('#magnate .patience .bar'), `${S.magnate.lastLoss > 0 ? '−' : '+'}${Math.abs(S.magnate.lastLoss)}`, S.magnate.lastLoss > 0 ? 'down big' : 'up big');
+      }
+    }
+    if (now.hit && now.hit !== fxPrev.hit) {
+      const h = S.magnate.hits[0];
+      floatAt(document.querySelector('#magnate .patience .bar'), `−${h.hurt}`, 'down big', 60);
+      pulse(document.querySelector('#magnate'), 'fx-hit');
+    }
+    if (now.stage !== fxPrev.stage && ['dumping', 'monopoly', 'gone'].includes(now.stage)) pulse(document.querySelector('#magnate'), now.stage === 'gone' ? 'fx-glow' : 'fx-shake');
+    for (const m of S.merchants) if (fxPrev.owners[m.id] !== undefined && fxPrev.owners[m.id] !== now.owners[m.id]) pulse(document.querySelector(`.stall[data-id="${m.id}"]`), m.bankrupt && !m.ownedBy ? 'fx-fall' : 'fx-crown');
+  }
+  fxPrev = now;
+}

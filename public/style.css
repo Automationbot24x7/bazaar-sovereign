@@ -24,7 +24,7 @@ button:disabled { opacity: .5; cursor: progress; }
 .chain { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: #173525; color: var(--green); text-decoration: none; font-weight: 700; }
 .chain.mock { background: #3a2f22; color: var(--muted); }
 
-.stage { position: relative; min-height: 420px; background: url(/art/bazaar.webp) center 30% / cover no-repeat; display: flex; align-items: flex-end; padding: 0 16px 16px; }
+.stage { position: relative; min-height: 420px; background: url(/art/bazaar.webp) center 30% / cover no-repeat; display: flex; align-items: flex-end; padding: 124px 16px 16px; } /* the top strip is kept for the rumor pill and the Palace card */
 .stage::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(27,20,16,0) 35%, rgba(27,20,16,.85) 85%, var(--bg)); pointer-events: none; }
 .rumor { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 2; background: rgba(20,12,8,.82); border: 1px solid var(--gold); color: var(--parch); padding: 8px 18px; border-radius: 999px; font-style: italic; box-shadow: 0 6px 30px rgba(0,0,0,.4); animation: pulse 2s infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(224,165,38,.15); } }
@@ -83,7 +83,7 @@ button:disabled { opacity: .5; cursor: progress; }
 .feed ol { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow: auto; font-size: 12.5px; }
 .feed li { padding: 5px 0; border-bottom: 1px solid #3a2b1f; color: var(--muted); }
 .feed li b { color: var(--ink); font-weight: 600; }
-.feed li.event { color: #ffcfbf; } .feed li.rumor { color: var(--parch); font-style: italic; } .feed li.bankrupt, .feed li.error { color: var(--red); } .feed li.takeover { color: var(--gold); }
+.feed li.kind-event { color: #ffcfbf; } .feed li.kind-rumor { color: var(--parch); font-style: italic; } .feed li.kind-bankrupt, .feed li.kind-error { color: var(--red); } .feed li.kind-takeover { color: var(--gold); }
 .feed li a { color: var(--blue); text-decoration: none; font-family: ui-monospace, monospace; font-size: 11px; }
 .feed li .k { display: inline-block; min-width: 54px; font-size: 10px; text-transform: uppercase; font-weight: 700; color: var(--green); }
 
@@ -105,7 +105,7 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 .table-banner { padding: 7px 20px; font-size: 12.5px; background: #2b2118; color: var(--muted); border-bottom: 1px solid var(--line); }
 .table-banner.live { background: #13261b; color: #b8e6c6; }
 .table-banner a, .foot a { color: inherit; }
-.palace { position: absolute; top: 64px; right: 20px; z-index: 3; display: flex; gap: 10px; align-items: center; max-width: 380px; background: rgba(20,12,8,.88); border: 1px solid var(--gold); border-radius: 14px; padding: 10px 12px; box-shadow: 0 8px 30px rgba(0,0,0,.45); font-size: 13px; }
+.palace { position: absolute; top: 16px; right: 20px; z-index: 3; display: flex; gap: 10px; align-items: center; max-width: 380px; background: rgba(20,12,8,.88); border: 1px solid var(--gold); border-radius: 14px; padding: 10px 12px; box-shadow: 0 8px 30px rgba(0,0,0,.45); font-size: 13px; }
 .palace img { width: 46px; height: 46px; border-radius: 10px; }
 .palace .reward { color: var(--gold); font-weight: 800; font-size: 16px; margin-right: 8px; }
 .palace .claimed { font-size: 12px; color: var(--parch); }
@@ -138,8 +138,8 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 .standings tr.me td { color: var(--gold); font-weight: 700; }
 .end-actions { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 .foot { padding: 0 20px 24px; font-size: 12px; color: var(--muted); }
-.feed li.palace { color: var(--gold); } .feed li.deal { color: #d4c0ff; } .feed li.loan { color: var(--muted); }
-@media (max-width: 700px) { .palace { position: static; margin: 10px 0; max-width: none; } .stage { flex-direction: column; align-items: stretch; justify-content: flex-end; } }
+.feed li.kind-palace { color: var(--gold); } .feed li.kind-deal { color: #d4c0ff; } .feed li.kind-loan { color: var(--muted); }
+@media (max-width: 700px) { .palace { position: static; margin: 10px 0; max-width: none; } .stage { padding-top: 56px;  flex-direction: column; align-items: stretch; justify-content: flex-end; } }
 
 /* who's who + moods */
 #rivals { width: min(680px, calc(100vw - 32px)); max-height: 86vh; }
@@ -171,8 +171,10 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 .perk { font-size: 11px; margin-left: 3px; }
 
 .chips { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
-.chip { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--muted); animation: pop .3s ease-out; }
-.chip.bad { background: #3a1b14; color: #ffb4a3; } .chip.good { background: #173525; color: #a9e5bb; } .chip.warn { background: #3a300f; color: #ffd978; }
+.chip { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--muted); white-space: nowrap; animation: chip-in .3s ease-out; }
+/* tones are prefixed: a bare .good would pick up the market board's .good card (display: grid) */
+.chip.tone-bad { background: #3a1b14; color: #ffb4a3; } .chip.tone-good { background: #173525; color: #a9e5bb; } .chip.tone-warn { background: #3a300f; color: #ffd978; }
+@keyframes chip-in { from { opacity: 0; transform: scale(.9); } }
 
 /* ---------- v4: the Magnate, the Guild, rats ---------- */
 .magnate { padding: 10px 20px; background: linear-gradient(90deg, #3a130d, #2a1a10); border-bottom: 1px solid #a3402c; font-size: 13px; display: grid; gap: 6px; }
@@ -189,7 +191,7 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 .hit { color: var(--red); font-style: normal; font-weight: 700; }
 .guild { display: inline-flex; gap: 6px; align-items: center; color: var(--parch); }
 button.danger { border-color: var(--red); color: #ffcfbf; }
-.feed li.magnate { color: #ffb38f; } .feed li.guild { color: var(--blue); }
+.feed li.kind-magnate { color: #ffb38f; } .feed li.kind-guild { color: var(--blue); }
 .decision.kind-magnate { border-color: #a3402c; }
 
 .magnate .bar.share i { background: linear-gradient(90deg, #a3402c, #e0614a); }
@@ -213,3 +215,23 @@ button.danger { border-color: var(--red); color: #ffcfbf; }
 
 /* the hidden attribute always wins over a display set by a class (e.g. .palace { display: flex }) */
 [hidden] { display: none !important; }
+
+/* ---------- v6: motion ---------- */
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+.fx-float { position: fixed; transform: translate(-50%, 0); font-weight: 800; font-size: 20px; text-shadow: 0 2px 8px rgba(0,0,0,.8); animation: fx-rise 1.6s ease-out forwards; white-space: nowrap; }
+.fx-float.up { color: #8be0a2; } .fx-float.down { color: #ff8a73; }
+.fx-float.big { font-size: 28px; }
+@keyframes fx-rise { 0% { opacity: 0; transform: translate(-50%, 8px) scale(.8); } 15% { opacity: 1; transform: translate(-50%, 0) scale(1.08); } 100% { opacity: 0; transform: translate(-50%, -64px) scale(1); } }
+.fx-tick { animation: fx-tick .5s ease-out; display: inline-block; } @keyframes fx-tick { 40% { transform: scale(1.35); color: #fff3c4; } }
+.fx-hit { animation: fx-hit .45s ease-out; } @keyframes fx-hit { 30% { box-shadow: inset 0 0 0 2px #e0614a, 0 0 30px rgba(224,97,74,.45); } }
+.fx-shake { animation: fx-shake .6s ease-in-out; } @keyframes fx-shake { 15%, 55% { transform: translateX(-6px); } 35%, 75% { transform: translateX(6px); } }
+.fx-glow { animation: fx-glow 1.2s ease-out; } @keyframes fx-glow { 30% { box-shadow: inset 0 0 0 2px var(--gold), 0 0 40px rgba(240,189,69,.4); } }
+.fx-crown { animation: fx-crown 1.2s ease-out; } @keyframes fx-crown { 25% { transform: translateY(-6px) scale(1.03); box-shadow: 0 0 0 2px var(--gold), 0 0 40px rgba(240,189,69,.55); } }
+.fx-fall { animation: fx-fall 1s ease-out; } @keyframes fx-fall { 20% { transform: rotate(-1.5deg) translateY(4px); filter: saturate(.3); } 60% { transform: rotate(1deg); } }
+/* the bazaar breathes: a slow drift of the backdrop */
+.stage { animation: stage-drift 60s ease-in-out infinite alternate; }
+@keyframes stage-drift { from { background-position: 48% 28%; } to { background-position: 54% 34%; } }
+.goodwill b, .palace .bar i, .season i { transition: width .6s ease; }
+@media (prefers-reduced-motion: reduce) { .stage { animation: none; } .fx-float { display: none; } }
+.scene-card { animation: card-up .45s cubic-bezier(.2,.8,.2,1); } @keyframes card-up { from { opacity: 0; transform: translateY(24px); } }
+.fx-speak { animation: fx-speak .4s cubic-bezier(.2,.8,.2,1); } @keyframes fx-speak { from { transform: scale(.82) rotate(-3deg); opacity: .4; } }
