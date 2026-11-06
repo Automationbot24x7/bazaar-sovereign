@@ -255,3 +255,15 @@ button.danger { border-color: var(--red); color: #ffcfbf; }
 .fx-coin, .fx-good { position: fixed; left: 0; top: 0; margin: -9px 0 0 -9px; pointer-events: none; will-change: transform, opacity; }
 .fx-coin { width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff5c4 0 18%, #f6c445 40%, #b9800f 100%); box-shadow: 0 0 0 1px #8a5a06, 0 2px 6px rgba(0,0,0,.55), 0 0 12px rgba(255,200,80,.45); }
 .fx-good { width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 9px; border: 2px solid var(--gold); box-shadow: 0 4px 14px rgba(0,0,0,.6); }
+
+/* ---------- v8: street cries ---------- */
+.order.cry { margin-top: 8px; } .order.cry input { border-style: dashed; }
+.cryb { margin-left: auto; font-size: 11px; font-weight: 700; color: #ffd978; white-space: nowrap; }
+.goodwill i { flex: 0 1 120px; }
+.feed li.kind-cry { color: #ffd978; }
+.street-cry { position: absolute; z-index: 1; transform: translateX(-50%); max-width: min(280px, 18vw); padding: 7px 12px; border-radius: 14px; background: var(--parch); color: #3a2614;
+  font: italic 600 13.5px/1.3 Inter, sans-serif; text-align: center; box-shadow: 0 6px 18px rgba(0,0,0,.45); pointer-events: none; animation: cry-pop 4.2s ease-out forwards; }
+.street-cry::after { content: ''; position: absolute; left: 50%; bottom: -7px; margin-left: -7px; border: 7px solid transparent; border-bottom: 0; border-top-color: var(--parch); }
+.street-cry.loud { font-size: 15px; box-shadow: 0 0 0 2px var(--c, var(--gold)), 0 6px 22px rgba(0,0,0,.5); }
+@keyframes cry-pop { 0% { opacity: 0; transform: translate(-50%, 10px) scale(.7); } 8% { opacity: 1; transform: translate(-50%, 0) scale(1.06); } 14% { transform: translate(-50%, 0) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -14px); } }
+@media (max-width: 700px) { .street-cry { display: none; } }

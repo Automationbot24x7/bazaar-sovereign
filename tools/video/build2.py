@@ -40,7 +40,7 @@ wagon = [CLIP('magnate-wagon', 1600, BOARD)] if 'magnate-wagon' in marks else []
 SEGMENTS = [
     ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CLIP('board-idle', 1600, BOARD)]),
     ('s2', 'A charter NFT that does something', [STILL('00-board-day0', 1152, (0, 300), (768, 300)), ('nearblocks',)]),
-    ('s3', 'Rivals with memory and grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP(mk('decision-palace'), 1600, (160, 40)), *s3_extra]),
+    ('s3', 'Rivals that shout, scheme and hold grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1600, BOARD), CLIP(mk('decision-palace'), 1600, (160, 40))]),
     ('s4', 'Atomic deals through escrow', [STILL('haggle-reply', 960, (470, 262), (490, 282)), STILL('haggle-deal', 960, (480, 266), (480, 280))]),
     ('s5', 'Day 6: the Magnate arrives', [STILL('scene-arrival', 1280, (320, 290), (320, 330)), *wagon, STILL(st('decision-magnate'), 1440, (0, 100), (240, 140))]),
     ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1600, (0, 40))]),

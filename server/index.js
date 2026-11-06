@@ -6,9 +6,9 @@ import {
   GOODS, STANCES, SEASON_DAYS, createWorld, openingNews, step, netWorth, trading, takeover, takeoverPrice,
   acceptContract, executeDeal, executeBuyout, buyoutValue, standings, chartersOwned, log, checkSeason, backroomDeals, TRIBUTE,
   hireHelpers, buyAwning, capacity, HELPER_WAGE, AWNING_COST,
-  MAGNATE, GUILD, WATCH_COST, magnatePrice, raidMagnate, joinPact, borrow, repay, debtOf, bondOwed, canBorrow, hireWatch,
+  CRY, setCry, MAGNATE, GUILD, WATCH_COST, magnatePrice, raidMagnate, joinPact, borrow, repay, debtOf, bondOwed, canBorrow, hireWatch,
 } from './engine.js';
-import { think, interpretOrder, answerOffer, answerPact, aiOn, stats, MODEL_LABEL, spend } from './brains.js';
+import { think, interpretOrder, answerOffer, answerPact, judgeCry, aiOn, stats, MODEL_LABEL, spend } from './brains.js';
 import { makeChain, testnetAvailable } from './chain.js';
 
 const PORT = process.env.PORT || 3000;
@@ -22,16 +22,16 @@ const AI_MAX_INFLIGHT = Number(process.env.AI_MAX_INFLIGHT || 10);
 
 export const ROSTER = [
   { id: 'you', slug: 'player', art: 'player', name: 'Your House', player: true, color: '#e0a526', persona: 'The player.', model: 'claude-haiku-5-5' },
-  { id: 'teodora', slug: 'teodora', art: 'teodora', name: 'Teodora', color: '#5aa469', model: 'claude-sonnet-5-5',
+  { id: 'teodora', slug: 'teodora', art: 'teodora', name: 'Teodora', color: '#5aa469', voice: 0.6, model: 'claude-sonnet-5-5',
     persona: 'An elderly tea and salt trader with forty years at the same stall. Patient and cautious, hates debt, loves festivals, never panics. Calls younger merchants "children".',
     profile: { bio: 'Forty years at the same tea-and-salt stall. Patient, debt-shy, and never panics.', opening: 'Steady trade in cheap staples, saving her strength for festivals.' } },
-  { id: 'kasim', slug: 'kasim', art: 'kasim', name: 'Kasim', color: '#d35d47', model: 'claude-haiku-5-5',
+  { id: 'kasim', slug: 'kasim', art: 'kasim', name: 'Kasim', color: '#d35d47', voice: 0.8, model: 'claude-haiku-5-5',
     persona: 'A loud, fast-talking young hawker who wins customers by always being the cheapest stall. Thin margins, high volume, a little reckless, loves a bargain and a boast.',
     profile: { bio: 'Young, loud and fast. Wins customers by always being the cheapest stall in town.', opening: 'Undercuts everyone on everything: thin margins, big volume.' } },
-  { id: 'vey', slug: 'vey', art: 'vey', name: 'Vey', color: '#8e6cc9', model: 'claude-sonnet-5-5',
+  { id: 'vey', slug: 'vey', art: 'vey', name: 'Vey', color: '#8e6cc9', voice: 0.5, model: 'claude-sonnet-5-5',
     persona: 'An aristocratic silk merchant who sells quality to the rich at high margins and refuses to scrap over coppers. Disdains Kasim. Calls people "darling".',
     profile: { bio: 'Silk merchant to the nobility. Will not haggle in the dust over coppers.', opening: 'Premium silk: few sales, fat margins, loyal rich customers.' } },
-  { id: 'ozzo', slug: 'ozzo', art: 'ozzo', name: 'Ozzo', color: '#3b8bd0', model: 'claude-opus-5-5',
+  { id: 'ozzo', slug: 'ozzo', art: 'ozzo', name: 'Ozzo', color: '#3b8bd0', voice: 0.35, model: 'claude-opus-5-5',
     persona: 'A monk turned merchant who never forgets a rumor. Bold, greedy and scheming; tries to corner whatever market is about to spike. Thinks slowly and deeply, plans several moves ahead.',
     profile: { bio: 'A monk turned merchant who never forgets a rumor, and never forgives a debt.', opening: 'Waits for a rumor, then tries to corner the good that is about to spike.' } },
 ];
@@ -113,6 +113,8 @@ class Game {
         this.remember(m, d);
         m.doctrine = { stance: d.stance, focus: d.focus, aggression: d.aggression };
         if (d.bark) m.bark = d.bark;
+        // the line they shout is their street cry; how well it lands depends on their voice (Kasim is the loudest)
+        if (d.bark) setCry(w, m, d.bark, (m.voice ?? 0.4) + (Math.random() - 0.5) * 0.2, d.focus);
         m.thought = d.thought; m.brain = d.engine; m.thinkMs = d.ms; m.cached = d.cached;
         if (d.claim) {
           const c = w.contracts.find(c => c.status === 'open' && !c.takenBy);
@@ -303,7 +305,7 @@ class Game {
       contracts: w.contracts.slice(0, 6).map(c => ({ ...c, takenByName: c.takenBy ? w.merchants.find(m => m.id === c.takenBy)?.name : null, deliveredByName: c.deliveredBy ? w.merchants.find(m => m.id === c.deliveredBy)?.name : null, progress: c.takenBy ? Math.min(c.qty, w.merchants.find(m => m.id === c.takenBy).inventory[c.good]) : null })),
       news: w.news.slice(0, 30),
       merchants: w.merchants.map(m => ({
-        id: m.id, name: m.name, art: m.art, color: m.color, player: !!m.player, gold: Math.round(m.gold), netWorth: Math.round(netWorth(w, m)),
+        id: m.id, name: m.name, art: m.art, color: m.color, player: !!m.player, cry: m.cry && w.day - m.cry.day < CRY.days ? { ...m.cry, score: +m.cry.score.toFixed(2) } : null, gold: Math.round(m.gold), netWorth: Math.round(netWorth(w, m)),
         inventory: m.inventory, lastPnl: Math.round(m.lastPnl), doctrine: m.doctrine, bark: m.bark, thought: m.thought, brain: m.brain,
         modelLabel: MODEL_LABEL[m.model] || null, thinkMs: m.thinkMs || 0, thinking: this.thinking.has(m.id),
         bankrupt: m.bankrupt, magnateHeld: !!m.magnateHeld, goodwill: m.goodwill ?? 0, ownedBy: m.ownedBy || null, vassal: !!m.ownedBy, tribute: Math.round(m.tribute || 0), trading: trading(m), tokenId: m.tokenId, wallet: m.wallet, owner: m.wallet ? this.ownerOf(m) : null,
@@ -452,7 +454,7 @@ const body = req => new Promise(r => { let d = ''; req.on('data', c => { d += c;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.json': 'application/json' };
 const lastOrder = new Map();
 
-const AI_ROUTES = new Set(['/api/offer', '/api/order', '/api/pact']);
+const AI_ROUTES = new Set(['/api/offer', '/api/order', '/api/pact', '/api/cry']);
 http.createServer(async (req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -469,6 +471,16 @@ http.createServer(async (req, res) => {
       const b = await body(req);
       const w = g.world, me = g.me();
       switch (p) {
+        case '/api/cry': {
+          // the player's crier shouts once a day; the crowd judges how well it lands
+          const text = String(b.text ?? '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);
+          if (text.length < 4) throw new Error('Give your crier something to shout');
+          if (me.cry && me.cry.day === w.day && me.cry.byPlayer) throw new Error('Your crier is hoarse. Shout again tomorrow');
+          const j = await withAiSlot(() => judgeCry(w, me, text), () => judgeCry(w, { ...me, _offline: true }, text));
+          setCry(w, me, text, j.charm / 10, j.good); me.cry.byPlayer = true; me.bark = text;
+          log(w, `${me.name} cries: "${text}" — ${j.crowd} (charm ${j.charm}/10)`, 'cry');
+          return send(res, 200, { ...g.view(), cryVerdict: j });
+        }
         case '/api/name': { g.playerName = houseName(b.name); me.name = g.playerName; return send(res, 200, g.view()); }
         case '/api/play': g.play(); return send(res, 200, g.view());
         case '/api/pause': g.pause(); return send(res, 200, g.view());

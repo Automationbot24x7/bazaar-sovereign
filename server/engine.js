@@ -65,6 +65,20 @@ export const TRIBUTE = 0.2; // a vassal stall sends this share of each day's pro
 export const trading = m => !m.bankrupt; // vassal stalls keep trading under their owner
 export const log = (w, text, kind = 'info', extra = null) => { w.news.unshift({ day: w.day, text, kind, ...extra }); w.news.length = Math.min(w.news.length, 60); };
 
+// ---------- street cries: a stall that calls out well draws shoppers for a few days ----------
+// score 0..1 is how charming the cry was; a cry about one good helps that good most.
+export const CRY = { days: 3, max: 0.3 };
+export function cryBoost(w, m, good) {
+  const c = m.cry; if (!c) return 0;
+  const age = w.day - c.day; if (age < 0 || age >= CRY.days) return 0;
+  const fit = c.good ? (c.good === good ? 1 : 0.35) : 0.7;
+  return CRY.max * c.score * fit * (1 - age / CRY.days);
+}
+export function setCry(w, m, text, score, good = null) {
+  m.cry = { text: String(text).slice(0, 120), score: Math.min(1, Math.max(0, Number(score) || 0)), good: GOODS.some(g => g.id === good) ? good : null, day: w.day };
+  return m.cry;
+}
+
 export function netWorth(w, m) {
   return m.gold + GOODS.reduce((t, g) => t + m.inventory[g.id] * w.prices[g.id] * 0.8, 0) - debtOf(w, m);
 }
@@ -265,7 +279,7 @@ export function step(w) {
     for (const b of book) b.m.lastAsk = { ...(b.m.lastAsk || {}), [g.id]: b.ask };
     let sellers = book.filter(b => avail(b) > 0 && b.ask < choke);
     // goodwill: loyal shoppers stick with a stall that has treated them fairly (the Magnate has none)
-    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.45 : 1) * (b.m.id === 'magnate' ? magnateWeight(mg) : 1 + (b.m.goodwill || 0));
+    const weight = b => Math.pow(g.base / b.ask, E) * (b.m.doctrine.stance === 'premium' ? 1.45 : 1) * (b.m.id === 'magnate' ? magnateWeight(mg) : (1 + (b.m.goodwill || 0)) * (1 + cryBoost(w, b.m, g.id)));
     if (sellers.length) {
       const W0 = sellers.reduce((t, b) => t + weight(b), 0);
       const pAvg = sellers.reduce((t, b) => t + b.ask * weight(b), 0) / W0;

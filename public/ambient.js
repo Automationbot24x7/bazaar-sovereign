@@ -102,7 +102,11 @@
     if (evKey !== lastEvents) { if (m.caravan && !lastEvents.includes('caravan')) caravan(); lastEvents = evKey; }
     if (m.stage !== lastStage) { if (m.stage === 'dumping' && lastStage) nextWagon = t; lastStage = m.stage; }
     if (['dumping', 'monopoly'].includes(m.stage) && t > nextWagon) { magnateTrain(); nextWagon = t + rnd(24, 34); }
-    for (const w of walkers) { w.x += w.dir * w.speed * dt; w.phase += dt * w.speed / (w.h * 0.18); }
+    for (const w of walkers) {
+      // a shopper who heard a good cry stops in front of that stall for a moment
+      if (w.stopAt != null && w.dir * (w.x - w.stopAt) >= 0) { if (w.stopFor > 0) { w.stopFor -= dt; continue; } w.stopAt = null; }
+      w.x += w.dir * w.speed * dt; w.phase += dt * w.speed / (w.h * 0.18);
+    }
     for (let i = walkers.length - 1; i >= 0; i--) { const w = walkers[i]; if ((w.dir > 0 && w.x - w.w > W + 60) || (w.dir < 0 && w.x + w.w < -60)) walkers.splice(i, 1); }
   }
   function drawWalkers() {
@@ -124,6 +128,53 @@
       ctx.drawImage(w.img, -w.w / 2, -w.h, w.w, w.h);
       ctx.restore();
     }
+  }
+
+  // ---------- street cries: bubbles over the stalls, shoppers stop for a good one, rivals call out loud ----------
+  let nextCry = 3, lastVoice = -99;
+  const heard = {};
+  const crier = new Audio(); crier.volume = 0.4;
+  const canSpeak = () => typeof soundOn !== 'undefined' && soundOn && typeof userActed !== 'undefined' && userActed
+    && document.querySelector('#scene')?.hidden !== false && S?.running && t - lastVoice > 11;
+  function stallPos(id) {
+    const el = document.querySelector(`.stall[data-id="${id}"]`); if (!el) return null;
+    const r = el.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    return { x: r.left - sr.left + r.width / 2, top: r.top - sr.top };
+  }
+  function bubble(m, loud) {
+    const p = stallPos(m.id), text = (m.cry?.text || m.bark || '').trim();
+    if (!p || !text || W < 700) return;
+    stage.querySelectorAll(`.street-cry[data-id="${m.id}"]`).forEach(e => e.remove());
+    const b = document.createElement('div');
+    b.className = `street-cry${loud ? ' loud' : ''}`; b.dataset.id = m.id; b.textContent = text.length > 84 ? text.slice(0, 82) + '…' : text;
+    b.style.left = `${p.x}px`; b.style.bottom = `${H - p.top + 12}px`; b.style.setProperty('--c', m.color);
+    stage.appendChild(b); setTimeout(() => b.remove(), 4300);
+    // the better the cry, the more passers-by stop to listen, and a charming one pulls in someone new
+    const score = m.cry?.score ?? 0.3;
+    if (!reduce && SP) {
+      for (const w of walkers) if (w.sheet === 'townsfolk' && w.stopAt == null && Math.abs(w.x - p.x) < 480 && w.dir * (p.x - w.x) > 0 && Math.random() < 0.3 + score * 0.6) { w.stopAt = p.x + rnd(-70, 70); w.stopFor = rnd(1.6, 2.8) * (0.6 + score); }
+      if (score > 0.55 && Math.random() < score) { const wk = spawn('townsfolk', Math.floor(Math.random() * SP.townsfolk.length)); if (wk) { wk.stopAt = p.x + rnd(-60, 60); wk.stopFor = rnd(2, 3.5); } }
+    }
+    if (!m.player && canSpeak() && Math.random() < 0.6) {
+      crier.src = `/audio/lines/cry_${m.id}-${1 + Math.floor(Math.random() * 3)}.mp3`;
+      crier.play().then(() => { lastVoice = t; }).catch(() => {});
+    }
+  }
+  function updateCries() {
+    const st = typeof S !== 'undefined' && S ? S : null;
+    if (!st || st.over) return;
+    const live = st.merchants.filter(m => m.trading !== false && !m.bankrupt);
+    // a brand-new cry is shouted at once; otherwise the stalls take turns, the loudest more often
+    const key = m => m.cry ? `${m.cry.day}|${m.cry.text}` : '';
+    if (!heard.seeded) { for (const m of live) heard[m.id] = key(m); heard.seeded = true; }   // cries from before the page opened are old news
+    const fresh = live.find(m => m.cry && heard[m.id] !== key(m));
+    if (fresh) { heard[fresh.id] = key(fresh); bubble(fresh, true); nextCry = t + rnd(3, 5); return; }
+    if (t < nextCry || !live.length) return;
+    const wt = live.map(m => 0.25 + (m.cry?.score ?? 0.2));
+    let r = Math.random() * wt.reduce((a, b) => a + b, 0), i = 0;
+    while (r > wt[i] && i < wt.length - 1) r -= wt[i++];
+    bubble(live[i], false);
+    nextCry = t + rnd(5, 9) / (st.running ? 1.3 : 1);
   }
 
   // ---------- light, dust, sky ----------
@@ -222,6 +273,7 @@
     drawSkyLanterns(dt, m);
     drawLanterns(v, m);
     if (SP && !reduce) { updateWalkers(dt, m); drawWalkers(); }
+    updateCries();
     drawMotes(dt, m);
     drawWeather(dt, m);
   }

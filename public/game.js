@@ -26,6 +26,10 @@ const unitsOf = id => S.goods.find(g => g.id === id)?.units || 'units';
 const unitOf = id => S.goods.find(g => g.id === id)?.unit || 'unit';
 const merchant = id => S.merchants.find(m => m.id === id);
 
+// a stall's street cry draws extra shoppers for 3 days, most for the good it names
+const cryPct = m => m.cry ? Math.round(30 * m.cry.score * Math.max(0, 1 - (S.day - m.cry.day) / 3)) : 0;
+const cryBadge = m => { const p = cryPct(m); return p ? `<span class="cryb" title="Street cry: “${esc(m.cry.text)}” draws up to ${p}% more shoppers${m.cry.good ? ' for ' + esc(goodName(m.cry.good)) : ''}">📣 +${p}%</span>` : ''; };
+
 // ---------- render ----------
 function stalls() {
   $('#stalls').innerHTML = S.merchants.map(m => {
@@ -43,7 +47,7 @@ function stalls() {
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>Charter NFT</span>${m.walletUrl ? `<a href="${m.walletUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="This stall's own NEAR wallet">${esc(m.wallet)} ↗</a>` : `<span title="This stall's own wallet">${esc(m.wallet || '')}</span>`}</div>
       ${m.magnateHeld ? `<div class="owned held">🐫 Charter held by ${esc(S.magnate?.name || 'the Magnate')}</div>` : m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}
-      ${m.trading ? `<div class="goodwill" title="Goodwill: shoppers stay loyal to stalls that trade fairly. Gouging, empty shelves and rats lose it."><span>♥ Goodwill</span><i><b style="width:${Math.round((m.goodwill / 0.8) * 100)}%"></b></i></div>` : ''}
+      ${m.trading ? `<div class="goodwill" title="Goodwill: shoppers stay loyal to stalls that trade fairly. Gouging, empty shelves and rats lose it."><span>♥ Goodwill</span><i><b style="width:${Math.round((m.goodwill / 0.8) * 100)}%"></b></i>${cryBadge(m)}</div>` : ''}
       ${owner ? `<div class="owned">♛ Vassal of ${owner.player ? 'your house' : esc(owner.name)} · pays ${owner.player ? 'you' : 'them'} 20% of its profit</div>` : ''}
       ${m.tribute ? `<div class="owned">Vassals have paid ${m.player ? 'you' : 'this house'} ${dh(m.tribute)}</div>` : ''}
     </article>`;
@@ -307,6 +311,22 @@ $('#stalls').onclick = e => {
 };
 $('#stalls').onkeydown = e => { const card = e.target.closest('.stall.clickable'); if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDeal(card.dataset.id); } };
 $('#palace').onclick = e => { if (e.target.id === 'claim') api('/api/contract', { id: e.target.dataset.id }).then(render).catch(err => alert(err.message)); };
+$('#cryForm').onsubmit = async e => {
+  e.preventDefault();
+  const text = $('#cry').value.trim(), btn = $('#cryBtn');
+  if (!text) return;
+  btn.disabled = true; btn.textContent = 'Crying…';
+  try {
+    const r = await api('/api/cry', { text });
+    render(r);
+    const v = r.cryVerdict, me = r.merchants.find(m => m.player);
+    $('#cryReply').hidden = false;
+    $('#cryReply').innerHTML = `<b>The crowd:</b> “${esc(v.crowd)}” <span class="muted">charm ${v.charm}/10 → up to +${cryPct(me)}% shoppers for 3 days${v.good ? ' · ' + esc(goodName(v.good)) : ''}</span>`;
+    floatAt(document.querySelector('.stall.me .nw'), `📣 ${v.charm}/10`, v.charm >= 5 ? 'up big' : 'down');
+    $('#cry').value = '';
+  } catch (err) { $('#cryReply').hidden = false; $('#cryReply').innerHTML = `<span class="muted">${esc(err.message)}</span>`; }
+  btn.disabled = false; btn.textContent = 'Cry out';
+};
 $('#orderForm').onsubmit = async e => {
   e.preventDefault();
   const order = $('#order').value.trim(); if (!order) return;

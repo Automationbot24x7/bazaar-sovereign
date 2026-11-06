@@ -59,6 +59,11 @@
         <button class="primary" id="orderBtn">Send</button>
       </form>
       <div id="reply" class="reply" hidden></div>
+      <form id="cryForm" class="order cry" title="Your crier shouts it once a day. The crowd judges it: a charming cry draws more shoppers for 3 days.">
+        <input id="cry" autocomplete="off" maxlength="90" placeholder="📣 Your street cry… e.g. “Saffron so red the sunset is jealous!”" />
+        <button class="ghost" id="cryBtn">Cry out</button>
+      </form>
+      <div id="cryReply" class="reply" hidden></div>
       <div class="stances" id="stances"></div>
       <div class="row">
         <label>Focus <select id="focus"><option value="">All goods</option></select></label>
@@ -142,6 +147,7 @@
       <li><b>Rumors</b> warn of droughts, caravans and festivals a day early. Corner a market before it moves.</li>
       <li><b>Palace orders</b> pay double. Claim one, then buy up the good to deliver it.</li>
       <li><b>Haggle</b>: tap a rival to buy their stock or offer to buy out their whole house.</li>
+      <li><b>Street cries</b>: shout one line a day. The crowd judges it, and a charming cry pulls more shoppers to your stall for 3 days.</li>
       <li>Rivals who run out of gold go <b>bankrupt</b>. Seize their charter, or buy out a rival outright, and their stall becomes your <b>vassal</b>: it keeps trading under your strategy and pays you 20% of its profit.</li>
     </ul>
     <p><b>Win:</b> be the richest house (vassals included) on day 24 — or hold <b>three charters</b> and be crowned Sovereign at once.</p>
