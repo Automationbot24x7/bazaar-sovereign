@@ -39,15 +39,15 @@ mk = lambda pre: next((m for m in marks if m.startswith(pre)), pre)
 RUNNING = next((m for m in marks if m.startswith('event-')), 'board-idle')
 st = lambda pre: next((f[:-4] for f in sorted(os.listdir(f'{CAP}/stills')) if f.startswith(pre)), pre)
 EVENT = next((m for m in ('event-caravan', 'event-festival', 'event-storm', 'event-monsoon', 'event-drought') if m in marks), None)
-s3_extra = [CLIP(EVENT, 1600, BOARD)] if EVENT else []
-wagon = [CLIP('magnate-wagon', 1600, BOARD)] if 'magnate-wagon' in marks else []
+s3_extra = [CLIP(EVENT, 1920, (0, 0))] if EVENT else []
+wagon = [CLIP('magnate-wagon', 1920, (0, 0))] if 'magnate-wagon' in marks else []
 SEGMENTS = [
-    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CINE('trailer-flyin'), CLIP(RUNNING, 1600, BOARD)]),
-    ('s2', 'A charter NFT that does something', [STILL(st('cry-verdict'), 1152, (0, 300), (768, 300)), CLIP('inspector', 1280, (320, 60))]),
-    ('s3', 'Rivals that shout, scheme and hold grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1600, BOARD), CLIP(mk('decision-palace'), 1600, (160, 40))]),
+    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CINE('trailer-flyin'), CLIP(RUNNING, 1920, (0, 0))]),
+    ('s2', 'A charter NFT that does something', [STILL(st('cry-verdict'), 1152, (0, 300), (768, 300)), STILL(st('inspector'), 1280, (320, 80), (320, 200))]),
+    ('s3', 'Rivals that shout, scheme and hold grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1920, (0, 0)), CLIP(mk('decision-palace'), 1920, (0, 0))]),
     ('s4', 'Atomic deals through escrow', [STILL('haggle-reply', 960, (470, 262), (490, 282)), STILL('haggle-deal', 960, (480, 266), (480, 280))]),
     ('s5', 'Day 6: the Magnate arrives', [CINE('trailer-arrival'), STILL(st('decision-magnate'), 1440, (0, 100), (240, 140)), *wagon]),
-    ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1600, (0, 40)), CINE('scene-wins')]),
+    ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1920, (0, 0)), CINE('scene-wins')]),
     ('s7', 'Every move is on-chain', [CINE('scene-leaves'), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
     ('s8', 'Play free: bazaar.reconscribe.com', [CINE('trailer-festival'), STILL('end-screen', 960, (480, 245), (480, 262)), ('end',)]),
 ]
@@ -75,7 +75,8 @@ def motion_clip(out, secs, t0, w, a, cap):
             fh.write(f"file '{f}'\nduration {max(0.001, nxt - t):.4f}\n")
         fh.write(f"file '{sel[-1][0]}'\n")
     h = w * 9 // 16
-    vf = f"fps={FPS},crop={w}:{h}:{a[0]}:{a[1]},scale=1920:1080:flags=lanczos,{caption(cap)},format=yuv420p"
+    # gameplay frames are native 1920x1080: a full-frame clip is used as is (no enlarging, so text stays sharp)
+    vf = f"fps={FPS},crop={w}:{h}:{a[0]}:{a[1]},{'' if w == 1920 else 'scale=1920:1080:flags=lanczos,'}{caption(cap)},format=yuv420p"
     run('-f', 'concat', '-safe', '0', '-i', lst, '-vf', vf, '-t', f'{secs}', '-r', str(FPS), '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', out)
 
 def cine_clip(out, secs, src, cap):

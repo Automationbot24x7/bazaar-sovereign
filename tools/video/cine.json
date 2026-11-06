@@ -52,7 +52,7 @@
         "bazaar",
         "wagon"
       ],
-      "prompt": "Dawn at the city gate of the desert town. The black-and-gold wagons with golden canopies roll out through the gate into the open desert, trailing dust. Behind them, merchants stand at their colorful stalls, cheering and waving."
+      "prompt": "Dawn at the city gate of the desert town. The black-and-gold wagons with golden canopies roll out of the gate and away into the open desert toward the rising sun on the right. Every wagon is pulled by its camel harnessed IN FRONT of it: each camel walks ahead of its own wagon, facing right, away from the gate, toward the desert. No camel faces back toward the gate. Dust trails behind the wagons. Behind them, merchants stand at their colorful stalls, cheering and waving."
     },
     "wins": {
       "ratio": "16:9",
@@ -135,7 +135,7 @@
       "model": "kling30",
       "image": "still:leaves",
       "loop": true,
-      "prompt": "Ambient motion at dawn: dust drifts behind the departing wagons, pennants flutter, merchants wave and cheer, the sky slowly brightens. The camera stays almost still. Keep the painted style exactly."
+      "prompt": "Ambient motion at dawn: the camels walk forward pulling their wagons away toward the desert on the right, dust drifts behind the wagons, pennants flutter, merchants wave and cheer. The camera stays almost still. Keep the painted style exactly."
     },
     "scene-wins": {
       "model": "kling30",
