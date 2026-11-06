@@ -67,8 +67,17 @@ async function retry(fn, tries = 4) {
 }
 const pendingTx = () => [...queues.values()].reduce((t, q) => t + q.n, 0);
 
+// a plain provider for existence checks: the failover provider logs every "does not exist" as an error
+let probe;
 async function exists(id) {
-  try { await provider.viewAccount({ accountId: id, finality: 'final' }); return true; } catch { return false; }
+  probe ||= new JsonRpcProvider({ url: RPCS[0] });
+  for (let i = 0; i < 3; i++) {
+    try { await probe.viewAccount({ accountId: id, finality: 'final' }); return true; } catch (e) {
+      if (/does not exist|AccountDoesNotExist|UNKNOWN_ACCOUNT/i.test(`${e.name} ${e.message}`)) return false;
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  return false;
 }
 const view = (method, args) => provider.callFunction({ contractId: CONTRACT, method, args, finality: 'optimistic' });
 
