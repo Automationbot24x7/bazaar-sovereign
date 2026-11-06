@@ -10,7 +10,8 @@ import json, os, subprocess, shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(ROOT)
-V, CAP, T = 'art-src/video', 'art-src/video/cap', 'art-src/video/tmp2'
+V, T = 'art-src/video', 'art-src/video/tmp2'
+CAP = os.environ.get('CAP', 'art-src/video/cap')   # which recorded season to cut from
 shutil.rmtree(T, ignore_errors=True); os.makedirs(T)
 SANS = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 SERIF = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf'
