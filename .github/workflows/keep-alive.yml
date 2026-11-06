@@ -1,0 +1,17 @@
+# Keeps the free Hugging Face Space awake (it sleeps after 48 h without visitors).
+# Runs on GitHub's servers every 6 hours; set the repo variable GAME_URL to the Space's https://...hf.space address.
+name: keep-alive
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    if: ${{ vars.GAME_URL != '' }}  # idle until the Space is public and GAME_URL is set
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Visit the game
+        run: |
+          curl -fsS --retry 6 --retry-delay 30 --retry-all-errors --max-time 120 "${{ vars.GAME_URL }}/healthz"
+          echo
