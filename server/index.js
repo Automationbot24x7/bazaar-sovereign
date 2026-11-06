@@ -43,11 +43,13 @@ const withAiSlot = async (fn, fallback) => {
 };
 
 // ---------- memory helpers ----------
-function lesson(m, text) {
-  m.lessons ||= [];
+// lessons feed the rival's prompts (text) and show on its stall as short chips
+function lesson(m, text, chip = null, tone = 'neutral') {
+  m.lessons ||= []; m.chips ||= [];
   if (m.lessons.at(-1) === text) return;
   m.lessons.push(text);
   if (m.lessons.length > 8) m.lessons.shift();
+  if (chip) { m.chips.push({ text: chip, tone }); if (m.chips.length > 3) m.chips.shift(); }
 }
 function mood(m) {
   const r = m.relation || 0;
@@ -109,7 +111,8 @@ class Game {
       const delta = Math.round(worth - ep.worth), days = w.day - ep.day;
       if (days >= 2 && Math.abs(delta) >= 40) {
         const what = `${cur.stance}${cur.focus ? ' on ' + cur.focus : ''}`;
-        lesson(m, delta > 0 ? `Playing ${what} on days ${ep.day}–${w.day} earned ${delta}g.` : `Playing ${what} on days ${ep.day}–${w.day} lost ${-delta}g.`);
+        lesson(m, delta > 0 ? `Playing ${what} on days ${ep.day}–${w.day} earned ${delta} coins.` : `Playing ${what} on days ${ep.day}–${w.day} lost ${-delta} coins.`,
+          delta > 0 ? `${what} paid +${delta}` : `Burned on ${what} −${-delta}`, delta > 0 ? 'good' : 'bad');
       }
     }
     if (!same) m.episode = { day: w.day, worth };
@@ -122,9 +125,10 @@ class Game {
     const bankruptBefore = new Set(w.merchants.filter(m => m.bankrupt).map(m => m.id));
     const { settlement } = step(w);
     for (const r of settlement) this.pnlBuffer[r.merchant] = (this.pnlBuffer[r.merchant] || 0) + r.pnl;
+    if (w.lastStorm?.day === w.day) for (const m of this.npcs()) { const l = w.lastStorm.losses[m.id]; if (l > 0) lesson(m, `A sudden storm on day ${w.day} soaked ${l} coins of my stock; I had no awning.`, `Soaked by the storm −${l}`, 'bad'); }
     for (const d of backroomDeals(w, m => m.relation || 0)) {
       this.chain.recordDeal(d.buyer, d.seller, d.good, d.qty, d.total, w.merchants);
-      if (d.reason === 'spite') lesson(d.seller, `Sold my ${d.good} to ${d.buyer.name} on day ${w.day} so the player could not fill the Palace order.`);
+      if (d.reason === 'spite') lesson(d.seller, `Sold my ${d.good} to ${d.buyer.name} on day ${w.day} so the player could not fill the Palace order.`, 'Sank your Palace order', 'bad');
     }
 
     // rivals re-think every 4 days (staggered), or at once on a rumor, an event or a new Palace order
@@ -134,7 +138,7 @@ class Game {
 
     // vultures: a rich rival seizes a bankrupt charter if the player hasn't within 3 days
     for (const t of w.merchants.filter(m => m.bankrupt && !m.ownedBy)) {
-      if (t.bankruptDay == null) for (const o of this.npcs()) lesson(o, `Saw ${t.name} go bankrupt on day ${w.day} while playing ${t.doctrine.stance}${t.doctrine.focus ? ' on ' + t.doctrine.focus : ''}.`);
+      if (t.bankruptDay == null) for (const o of this.npcs()) lesson(o, `Saw ${t.name} go bankrupt on day ${w.day} while playing ${t.doctrine.stance}${t.doctrine.focus ? ' on ' + t.doctrine.focus : ''}.`, `Saw ${t.name} fall`, 'warn');
       t.bankruptDay ??= w.day;
       if (w.day - t.bankruptDay >= 3) {
         const buyer = this.npcs().filter(m => m.gold > takeoverPrice(w, t) * 2).sort((a, b) => b.gold - a.gold)[0];
@@ -207,7 +211,7 @@ class Game {
         netHistory: m.netHistory.slice(-60), lastAsk: m.lastAsk || {},
         takeoverPrice: m.bankrupt && !m.ownedBy ? takeoverPrice(w, m) : null,
         helpers: m.helpers || 0, helperDays: m.helperDays || 0, awning: !!m.awning, capacity: capacity(m), servedToday: m.servedToday || 0,
-        profile: m.profile || null, lessons: (m.lessons || []).slice(-5), mood: m.player ? null : mood(m),
+        profile: m.profile || null, lessons: (m.lessons || []).slice(-5), chips: (m.chips || []).slice(-2), mood: m.player ? null : mood(m),
         buyoutHint: !m.player && trading(m) && !m.ownedBy ? buyoutValue(w, m) : null,
       })),
       standings: standings(w), over: w.over, result: w.result,
@@ -276,7 +280,8 @@ async function makeOffer(g, b) {
   const fair = offer.kind === 'buyout' ? buyoutValue(w, rival) : w.prices[offer.good] * offer.qty;
   const asked = offer.kind === 'buyout' ? offer.price : offer.price * offer.qty;
   if (reply.accept) rival.relation = Math.min(3, (rival.relation || 0) + 1);
-  else if (asked < fair * 0.6) { rival.relation = Math.max(-3, (rival.relation || 0) - 1); if ((rival.relation || 0) <= -2) lesson(rival, `The player keeps insulting me with lowball offers (day ${w.day}).`); }
+  else if (asked < fair * 0.6) { rival.relation = Math.max(-3, (rival.relation || 0) - 1); if ((rival.relation || 0) <= -2) lesson(rival, `The player keeps insulting me with lowball offers (day ${w.day}).`, 'Grudge: you lowballed me', 'bad'); }
+  if (reply.accept && (rival.relation || 0) >= 2) lesson(rival, `The player deals fairly with me (day ${w.day}).`, 'Trusts you', 'good');
   if (reply.accept) delete g.counters[key];
   rival.bark = reply.bark; rival.thought = reply.thought;
   if (reply.accept) {

@@ -33,6 +33,7 @@ function stalls() {
         <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>${m.helpers ? ` <span class="perk" title="${m.helpers} hired helper(s), ${m.helperDays} day(s) left">👥${m.helpers}</span>` : ''}${m.awning ? ' <span class="perk" title="Awning: safe from sudden storms">☂</span>' : ''}
         ${S.ai === 'live' && m.modelLabel && !m.vassal ? `<span class="brain" title="${esc(m.player ? 'Your factor' : m.name)} — ${esc(m.modelLabel)}${m.thinkMs ? `, last decision took ${(m.thinkMs / 1000).toFixed(1)}s` : ''}">${m.thinking ? '<i class="dots"></i>' : '✦'} ${esc(m.modelLabel)}${m.thinkMs ? ` · ${(m.thinkMs / 1000).toFixed(1)}s` : ''}</span>` : ''}
       </div>
+      ${m.chips?.length ? `<div class="chips">${m.chips.map(c => `<span class="chip ${c.tone}">${esc(c.text)}</span>`).join('')}</div>` : ''}
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>Charter NFT</span>${m.walletUrl ? `<a href="${m.walletUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="This stall's own NEAR wallet">${esc(m.wallet)} ↗</a>` : `<span title="This stall's own wallet">${esc(m.wallet || '')}</span>`}</div>
       ${m.bankrupt && !m.ownedBy && !m.player ? `<button class="primary takeover" data-target="${m.id}">Seize charter · ${dh(m.takeoverPrice)}</button>` : ''}

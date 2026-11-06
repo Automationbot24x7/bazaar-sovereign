@@ -169,3 +169,7 @@ dialog h2 { color: var(--gold); margin-top: 0; } dialog li { margin: 6px 0; } .m
 .upgrades { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); margin: -2px 0 10px; }
 .upgrades button { font-size: 12px; padding: 4px 10px; }
 .perk { font-size: 11px; margin-left: 3px; }
+
+.chips { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--muted); animation: pop .3s ease-out; }
+.chip.bad { background: #3a1b14; color: #ffb4a3; } .chip.good { background: #173525; color: #a9e5bb; } .chip.warn { background: #3a300f; color: #ffd978; }
