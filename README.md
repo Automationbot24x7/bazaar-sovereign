@@ -64,6 +64,10 @@ npm start
 
 **Live tables.** Each live table is its own set of five merchant wallets and charters (table 1: `kasim.<you>.testnet`, `charter-kasim`; table 2: `kasim-t2.<you>.testnet`, `charter-kasim-t2`; …), sharing one contract and treasury. A new visitor takes a free table; when all are seated they play an identical practice table with simulated entries, and move up to a live table on their next new season once one frees. A seat is released after 5 idle minutes. At the start of every season the table rebalances on-chain: each wallet returns last season's surplus to the treasury, and the treasury tops short wallets up to the same working capital.
 
+## Live
+
+Play at **https://bazaar.reconscribe.com**. It runs as an always-on Node.js worker on the owner's existing web hosting (its own website, separate from reconscribe.com). Update it with `bash tools/deploy-host.sh` (uploads over SSH; the host restarts the server). Keys live in a private `.env` on the server, never in the repo.
+
 ## Contract
 
 `contract/src/lib.rs` — Rust, `near-sdk` 5.30 + `near-contract-standards` (NEP-171 core, NEP-177 metadata, NEP-181 enumeration) plus NEP-245 goods.
