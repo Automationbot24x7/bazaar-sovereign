@@ -1,8 +1,8 @@
 // NEAR layer.
 //
 // makeChain(live):
-//  - live = true  → real NEAR testnet (only one game at a time can hold the live table,
-//                   because the merchant wallets and charters are real, unique accounts)
+//  - live = true  → real NEAR testnet at one of the live tables (each table is its own set of
+//                   merchant wallets and charters, so one game at a time can sit at it)
 //  - live = false → practice table: identical flow, simulated hashes, no network.
 //
 // What happens on-chain at the live table:
@@ -72,8 +72,11 @@ async function exists(id) {
 }
 const view = (method, args) => provider.callFunction({ contractId: CONTRACT, method, args, finality: 'optimistic' });
 
-export function makeChain(live) {
+// `table` picks which set of live accounts this game plays with: table 0 uses kasim.<root> and
+// charter-kasim, table n uses kasim-t<n+1>.<root> and charter-kasim-t<n+1>.
+export function makeChain(live, table = 0) {
   live = live && testnetAvailable;
+  const sfx = live && table ? `-t${table + 1}` : '';
   const feed = [];
   let mockSeq = 0, dealSeq = 0;
   const mockHash = () => `sim-${(++mockSeq).toString(36).padStart(5, '0')}`;
@@ -90,7 +93,7 @@ export function makeChain(live) {
     queues.set(signer, q);
     return q.p;
   };
-  const walletOf = slug => (live ? `${slug}.${ROOT}` : `${slug}.bazaar.near`);
+  const walletOf = slug => (live ? `${slug}${sfx}.${ROOT}` : `${slug}.bazaar.near`);
   const send = (from, to, amount) => acct(from).signAndSendTransaction({ receiverId: to, actions: [actions.transfer(amount)], waitUntil: 'INCLUDED' });
   const call = (signer, method, args, { deposit = 0n, gas = 100 } = {}) =>
     acct(signer).callFunctionRaw({ contractId: CONTRACT, methodName: method, args, deposit, gas: TGAS(gas) });
@@ -105,17 +108,50 @@ export function makeChain(live) {
     push('loan', `The treasury advances ${m.player ? 'you' : m.name} a little working capital.`, hashOf(r));
   }
 
+  // a new season starts every stall with the same working capital (SEED_NEAR): surplus earned
+  // last season goes back to the treasury, then short wallets are staked from it
+  async function rebalance(merchants) {
+    const seed = nearToYocto(SEED_NEAR), slack = nearToYocto('0.05');
+    const balanceOf = id => acct(id).getBalance().catch(() => null);
+    const name = m => (m.player ? 'Your stall' : `${m.name}'s stall`);
+    const before = await Promise.all(merchants.map(m => balanceOf(m.wallet)));
+    const returning = merchants.filter((m, i) => before[i] !== null && before[i] > seed + slack);
+    await Promise.all(returning.map(m => enqueue(m.wallet, `return ${m.wallet}`, async () => {
+      const surplus = (await balanceOf(m.wallet)) - seed;
+      if (surplus <= slack) return;
+      push('settle', `New season: ${name(m)} returns ${Number(yoctoToNear(surplus)).toFixed(3)} NEAR of last season's surplus to the treasury.`, hashOf(await send(m.wallet, TREASURY, surplus)));
+    })));
+    // a transfer is credited a block after it is included
+    if (returning.length) await new Promise(r => setTimeout(r, 3000));
+    for (const [i, m] of merchants.entries()) {
+      if (before[i] === null || before[i] >= seed / 2n) continue;
+      const amount = seed - before[i];
+      await enqueue(TREASURY, `stake ${m.wallet}`, async () => {
+        // the treasury keeps a small reserve for loans; the Vizier covers a shortfall
+        const from = (await balanceOf(TREASURY)) > amount + nearToYocto('0.1') ? TREASURY : ROOT;
+        push('wallet', `The ${from === TREASURY ? 'treasury' : 'Vizier'} tops ${m.player ? 'your stall' : `${m.name}'s stall`} up to ${SEED_NEAR} NEAR of working capital.`, hashOf(await send(from, m.wallet, amount)));
+      });
+    }
+  }
+
   const holdings = merchants => merchants.flatMap(m => GOODS.map(g => ({ account_id: m.wallet, token_id: g, amount: String(Math.max(0, Math.floor(m.inventory[g]))) })));
 
   return {
     live,
     feed,
     pending: () => (live ? pendingTx() : 0),
-    info: () => ({ mode: live ? 'testnet' : 'practice', testnetAvailable, root: ROOT || null, contract: live ? CONTRACT : null, treasury: live ? TREASURY : null, explorer: EXPLORER, goldToNear: GOLD_TO_NEAR, pending: live ? pendingTx() : 0 }),
+    info: () => ({ mode: live ? 'testnet' : 'practice', table: live ? table + 1 : null, testnetAvailable, root: ROOT || null, contract: live ? CONTRACT : null, treasury: live ? TREASURY : null, explorer: EXPLORER, goldToNear: GOLD_TO_NEAR, pending: live ? pendingTx() : 0 }),
     explorerAccount: id => (live ? `${EXPLORER}/address/${id}` : null),
 
+    // this game's seat was given to someone else: stop signing, keep the feed
+    goPractice(reason) {
+      if (!live) return;
+      live = false;
+      push('error', reason);
+    },
+
     async setupMerchants(merchants, ownerOf) {
-      for (const m of merchants) { m.wallet = walletOf(m.slug); m.tokenId = `charter-${m.slug}`; }
+      for (const m of merchants) { m.wallet = walletOf(m.slug); m.tokenId = `charter-${m.slug}${sfx}`; }
       if (!live) {
         for (const m of merchants) push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, mockHash());
         return;
@@ -129,7 +165,8 @@ export function makeChain(live) {
       for (const m of merchants) {
         await enqueue(ROOT, `wallet ${m.wallet}`, async () => {
           if (!(await exists(m.wallet))) {
-            const r = await root.createSubAccount({ accountOrPrefix: m.slug, publicKey: pubKey, nearToTransfer: nearToYocto(SEED_NEAR) });
+            // root pays only the account's storage; the treasury stakes its working capital below
+            const r = await root.createSubAccount({ accountOrPrefix: m.wallet.split('.')[0], publicKey: pubKey, nearToTransfer: nearToYocto('0.01') });
             push('wallet', `${m.player ? 'Your stall' : m.name + "'s stall"} gets its own NEAR wallet.`, hashOf(r));
           }
         });
@@ -146,6 +183,7 @@ export function makeChain(live) {
           push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, hashOf(r));
         });
       }
+      await rebalance(merchants);
       // a new season starts with empty warehouses
       enqueue(ROOT, 'reset goods', async () => {
         const r = await call(ROOT, 'sync_goods', { holdings: holdings(merchants) }, { gas: 200 });
@@ -183,7 +221,7 @@ export function makeChain(live) {
       const lockText = `${seller.name}'s stall locks ${qty} ${good} in escrow for ${buyer.player ? 'you' : buyer.name}, signed by its own wallet.`;
       const dealText = `${buyer.player ? 'You pay' : buyer.name + ' pays'} ${seller.name} ${Math.round(total)} coins (${fmtNear(total)} NEAR) and receive${buyer.player ? '' : 's'} the ${good} in the same transaction.`;
       if (!live) { push('escrow', lockText, mockHash()); push('deal', dealText, mockHash()); return; }
-      const offerId = `${seller.slug}-${buyer.slug}-${Date.now().toString(36)}-${(++dealSeq).toString(36)}`;
+      const offerId = `${seller.slug}-${buyer.slug}${sfx}-${Date.now().toString(36)}-${(++dealSeq).toString(36)}`;
       const price = yocto(total);
       let locked = false;
       // the Vizier first mirrors both houses' pre-deal stock so the seller's on-chain balance exists

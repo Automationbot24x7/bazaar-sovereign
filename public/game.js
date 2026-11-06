@@ -138,8 +138,15 @@ function header() {
   coach();
   const b = $('#tableBanner');
   b.hidden = false;
-  if (S.table === 'live') { b.className = 'table-banner live'; b.innerHTML = `● <b>Live table.</b> Your game is settling on NEAR testnet — every charter, wallet, sack of goods and payment below is a real transaction. <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">See the contract ↗</a>`; }
-  else { b.className = 'table-banner'; b.innerHTML = S.liveBusy ? '<b>Practice table.</b> Someone else is playing at the live NEAR table right now. Your game plays exactly the same; its on-chain entries are simulated.' : '<b>Practice table.</b> On-chain entries are simulated.'; }
+  if (S.table === 'live') { b.className = 'table-banner live'; b.innerHTML = `● <b>Live table${S.liveTables > 1 ? ` ${S.liveTable} of ${S.liveTables}` : ''}.</b> Your game is settling on NEAR testnet — every charter, wallet, sack of goods and payment below is a real transaction. <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">See the contract ↗</a>`; }
+  else {
+    b.className = 'table-banner';
+    const tables = S.liveTables > 1 ? `All ${S.liveTables} live NEAR tables are` : 'The live NEAR table is';
+    const lost = S.seatLost ? 'Your live seat was released while you were away. ' : '';
+    b.innerHTML = S.liveBusy ? `<b>Practice table.</b> ${lost}${tables} taken right now. Your game plays exactly the same; its on-chain entries are simulated.`
+      : S.liveTables ? `<b>Practice table.</b> ${lost}A live NEAR table is free: start a new season to play on-chain.`
+      : '<b>Practice table.</b> On-chain entries are simulated.';
+  }
   $('#foot').innerHTML = S.chain.mode === 'testnet' ? `Contract <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">${S.chain.contract}</a> · Treasury <a href="${S.chain.explorer}/address/${S.chain.treasury}" target="_blank" rel="noopener">${S.chain.treasury}</a> · 1 gold = ${S.chain.goldToNear} NEAR` : 'Bazaar Sovereign · built for NEAR HACKATHON 2026';
 }
 

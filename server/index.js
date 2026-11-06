@@ -15,7 +15,8 @@ const SETTLE_EVERY = 5;
 const MAX_GAMES = Number(process.env.MAX_GAMES || 150);
 const IDLE_PAUSE_MS = 45_000;          // a game pauses when its tab stops polling
 const GAME_TTL_MS = 30 * 60_000;       // and is forgotten after 30 idle minutes
-const LIVE_LEASE_MS = 5 * 60_000;      // the live testnet table frees up after 5 idle minutes
+const LIVE_LEASE_MS = Number(process.env.LIVE_LEASE_SEC || 300) * 1000; // a live testnet seat frees up after 5 idle minutes
+const LIVE_TABLES = testnetAvailable ? Math.max(1, Number(process.env.LIVE_TABLES || 3)) : 0;
 const AI_MAX_INFLIGHT = Number(process.env.AI_MAX_INFLIGHT || 10);
 
 export const ROSTER = [
@@ -58,14 +59,28 @@ function mood(m) {
 
 // ---------- games ----------
 const games = new Map();
-let liveHolder = null; // id of the game that holds the live testnet table
+// live testnet tables: each is its own set of merchant wallets and charters, seated by one game at a time
+const liveSeats = Array(LIVE_TABLES).fill(null); // table index -> game id
+const freeSeat = () => liveSeats.indexOf(null);
 
 class Game {
-  constructor(id, live, seed) {
-    this.id = id; this.live = live; this.lastSeen = Date.now();
+  constructor(id, table, seed) {
+    this.id = id; this.lastSeen = Date.now();
     this.running = false; this.speedMs = 2500; this.autoPause = true; this.decision = null; this.timer = null; this.thinking = new Set(); this.pnlBuffer = {};
-    this.chain = makeChain(live);
+    this.seat(table);
     this.reset(seed);
+  }
+  // sit at live table `table` (or the practice table when null); takes effect for the next season
+  seat(table) {
+    this.table = table; this.live = table !== null; this.seatLost = false;
+    if (this.live) liveSeats[table] = this.id;
+    this.chain = makeChain(this.live, table ?? 0);
+  }
+  leaveTable() {
+    if (!this.live) return;
+    liveSeats[this.table] = null;
+    this.table = null; this.live = false; this.seatLost = true;
+    this.chain.goPractice('Your seat at the live table was released after a few idle minutes. This game carries on as a practice table; start a new season to sit at a free live table.');
   }
   ownerOf(m) {
     if (m.ownedBy) return this.world.merchants.find(x => x.id === m.ownedBy).wallet;
@@ -195,7 +210,8 @@ class Game {
     const w = this.world, me = this.me();
     return {
       day: w.day, seasonDays: SEASON_DAYS, running: this.running, decision: this.decision, autoPause: this.autoPause, speedMs: this.speedMs, ai: aiOn() ? 'live' : 'heuristic',
-      table: this.live ? 'live' : 'practice', liveBusy: !this.live && testnetAvailable && !!liveHolder,
+      table: this.live ? 'live' : 'practice', liveTable: this.live ? this.table + 1 : null, liveTables: LIVE_TABLES, seatLost: this.seatLost,
+      liveBusy: !this.live && LIVE_TABLES > 0 && freeSeat() < 0,
       chain: this.chain.info(),
       goods: GOODS.map(g => ({ ...g, price: w.prices[g.id], history: w.history[g.id].slice(-60) })),
       events: w.active.map(e => ({ text: e.text, left: e.left })),
@@ -221,10 +237,21 @@ class Game {
   }
 }
 
+function dropGame(g) {
+  g.pause();
+  if (g.live) liveSeats[g.table] = null;
+  games.delete(g.id);
+}
+
 function sweep() {
   const now = Date.now();
-  for (const [id, g] of games) if (now - g.lastSeen > GAME_TTL_MS) { g.pause(); games.delete(id); }
-  if (liveHolder && (!games.has(liveHolder) || now - games.get(liveHolder).lastSeen > LIVE_LEASE_MS)) liveHolder = null;
+  for (const [id, g] of games) if (now - g.lastSeen > GAME_TTL_MS) dropGame(g);
+  for (const [i, id] of liveSeats.entries()) {
+    const g = id && games.get(id);
+    if (!id) continue;
+    if (!g) liveSeats[i] = null;
+    else if (now - g.lastSeen > LIVE_LEASE_MS) g.leaveTable();
+  }
 }
 setInterval(sweep, 30_000).unref();
 
@@ -234,18 +261,15 @@ function gameFor(req, res) {
   if (!g) {
     sweep();
     if (games.size >= MAX_GAMES) {
-      const oldest = [...games.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0];
-      oldest.pause(); games.delete(oldest.id);
+      dropGame([...games.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0]);
     }
     const id = randomBytes(12).toString('hex');
-    const live = testnetAvailable && !liveHolder;
-    if (live) liveHolder = id;
-    g = new Game(id, live, Number(process.env.SEED) || undefined);
+    const seat = freeSeat();
+    g = new Game(id, seat >= 0 ? seat : null, Number(process.env.SEED) || undefined);
     games.set(id, g);
     res.setHeader('Set-Cookie', `bs=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
   }
   g.lastSeen = Date.now();
-  if (g.id === liveHolder) g.lastSeen = Date.now();
   return g;
 }
 
@@ -308,7 +332,7 @@ const lastOrder = new Map();
 http.createServer(async (req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
   try {
-    if (p === '/healthz') return send(res, 200, { ok: true, games: games.size, live: !!liveHolder, aiInflight });
+    if (p === '/healthz') return send(res, 200, { ok: true, games: games.size, liveTables: LIVE_TABLES, liveSeated: liveSeats.filter(Boolean).length, aiInflight });
     if (p.startsWith('/api/')) {
       const g = gameFor(req, res);
       if (p === '/api/state') return send(res, 200, g.view());
@@ -341,7 +365,12 @@ http.createServer(async (req, res) => {
           for (let i = 0; i < days && !w.over; i++) { g.tick(); await new Promise(r => setTimeout(r, 150)); }
           return send(res, 200, g.view());
         }
-        case '/api/reset': g.reset(); return send(res, 200, g.view());
+        case '/api/reset': {
+          // a practice player moves up to a live table when one is free
+          if (!g.live && freeSeat() >= 0) g.seat(freeSeat());
+          g.reset();
+          return send(res, 200, g.view());
+        }
         case '/api/doctrine': {
           if (!STANCES.includes(b.stance)) return send(res, 400, { error: 'bad stance' });
           me.doctrine = { stance: b.stance, focus: GOODS.some(x => x.id === b.focus) ? b.focus : null, aggression: Math.min(1, Math.max(0, Number(b.aggression ?? 0.5))) };
@@ -382,5 +411,5 @@ http.createServer(async (req, res) => {
     send(res, 400, { error: e.message });
   }
 }).listen(PORT, () => {
-  console.log(`Bazaar Sovereign → http://localhost:${PORT} | live table: ${testnetAvailable ? 'NEAR testnet' : 'off (practice only)'} | minds: ${aiOn() ? 'live AI' : 'heuristic'}`);
+  console.log(`Bazaar Sovereign → http://localhost:${PORT} | live tables: ${LIVE_TABLES ? `${LIVE_TABLES} on NEAR testnet` : 'off (practice only)'} | minds: ${aiOn() ? 'live AI' : 'heuristic'}`);
 });

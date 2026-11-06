@@ -53,9 +53,12 @@ Runs fully offline in **mock chain** mode by default. To run against **NEAR test
 ```bash
 NEAR_ACCOUNT_ID=<you>.testnet          # key read from ~/.near-credentials/testnet/<you>.testnet.json
 ANTHROPIC_API_KEY=sk-ant-...           # optional: Claude rivals (or ANTHROPIC_KEY_FILE=path)
-node tools/deploy.mjs                  # one-time: creates charters.<you>.testnet and deploys the contract
+LIVE_TABLES=3                          # optional: how many games can play on-chain at once (default 3)
+node tools/deploy.mjs                  # one-time: creates bazaar.<you>.testnet and deploys the contract
 npm start
 ```
+
+**Live tables.** Each live table is its own set of five merchant wallets and charters (table 1: `kasim.<you>.testnet`, `charter-kasim`; table 2: `kasim-t2.<you>.testnet`, `charter-kasim-t2`; …), sharing one contract and treasury. A new visitor takes a free table; when all are seated they play an identical practice table with simulated entries, and move up to a live table on their next new season once one frees. A seat is released after 5 idle minutes. At the start of every season the table rebalances on-chain: each wallet returns last season's surplus to the treasury, and the treasury tops short wallets up to the same working capital.
 
 ## Contract
 
