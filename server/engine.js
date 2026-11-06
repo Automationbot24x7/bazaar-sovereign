@@ -11,7 +11,7 @@ const G = Object.fromEntries(GOODS.map(g => [g.id, g]));
 
 export const STANCES = ['steady', 'undercut', 'corner', 'hoard', 'premium', 'liquidate'];
 
-const EVENTS = [
+export const EVENTS = [
   { id: 'drought', text: 'Drought in the saffron fields', rumor: 'Farmers whisper the rains are late…', days: 4, supply: { saffron: 0.25 } },
   { id: 'caravan', text: 'A great silk caravan arrives', rumor: 'Dust on the eastern road — a caravan?', days: 2, supply: { silk: 2.4 } },
   { id: 'festival', text: 'Festival of Lanterns — the town feasts', rumor: 'Lantern makers are working overtime…', days: 3, demand: { saffron: 1.8, silk: 1.6, tea: 1.5, salt: 1.2 } },

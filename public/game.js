@@ -25,6 +25,7 @@ function stalls() {
         <h3>${esc(m.name)}</h3>
         <div class="nw">${m.netWorth.toLocaleString()}<small>g net</small> <span class="pnl ${pnl >= 0 ? 'up' : 'down'}">${pnl >= 0 ? '+' : ''}${pnl}</span></div>
         <span class="stance ${m.doctrine.stance}">${m.doctrine.stance}${m.doctrine.focus ? ' · ' + m.doctrine.focus : ''}</span>
+        ${S.ai === 'claude' && m.modelLabel ? `<span class="brain" title="${m.player ? 'Your factor runs on' : 'This rival thinks with'} Claude ${esc(m.modelLabel)}${m.cached ? ` · ${m.cached} prompt tokens served from cache` : ''}">${m.thinking ? '<i class="dots"></i>' : '✦'} ${esc(m.modelLabel)}${m.thinkMs ? ` · ${(m.thinkMs / 1000).toFixed(1)}s` : ''}</span>` : ''}
       </div>
       <div class="bark ${m.thinking ? 'thinking' : ''}" title="${esc(m.thought || '')}">${esc(m.bark || (m.player ? 'Awaiting your orders…' : '…'))}</div>
       <div class="charter"><span>NFT ${esc(m.tokenId || '')}</span>${chainLink ? `<a href="${chainLink}" target="_blank" rel="noopener">${esc(m.wallet)}</a>` : `<span>${esc(m.wallet || '')}</span>`}</div>

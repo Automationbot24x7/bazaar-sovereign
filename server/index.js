@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { GOODS, STANCES, createWorld, step, netWorth, takeover, takeoverPrice } from './engine.js';
-import { think, interpretOrder, aiOn } from './brains.js';
+import { think, interpretOrder, aiOn, stats, MODEL_LABEL } from './brains.js';
 import * as chain from './chain.js';
 
 const PORT = process.env.PORT || 3000;
@@ -11,15 +11,16 @@ const PLAYER_OWNER = process.env.PLAYER_ACCOUNT_ID || process.env.NEAR_ACCOUNT_I
 const VIZIER = process.env.NEAR_ACCOUNT_ID || 'vizier.mock';
 
 const ROSTER = [
-  { id: 'you', slug: 'player', name: 'Your House', player: true, color: '#e0a526', persona: 'The player.' },
-  { id: 'teodora', slug: 'teodora', name: 'Old Ma Teodora', color: '#5aa469', persona: 'Patient, cautious tea and salt trader with forty years in the bazaar. Hates debt, loves festivals, never panics.' },
-  { id: 'kasim', slug: 'kasim', name: 'Kasim the Quick', color: '#d35d47', persona: 'Loud, fast undercutter who always sells cheaper than everyone. Thin margins, high volume, a little reckless.' },
-  { id: 'vey', slug: 'vey', name: 'Lady Vey', color: '#8e6cc9', persona: 'Noble premium silk merchant. Refuses to compete on price; sells quality to the rich at high margins. Disdains Kasim.' },
-  { id: 'ozzo', slug: 'ozzo', name: 'Brother Ozzo', color: '#3b8bd0', persona: 'Bold, greedy schemer who acts on every rumor and tries to corner whatever market is about to spike.' },
+  { id: 'you', slug: 'player', name: 'Your House', player: true, color: '#e0a526', persona: 'The player.', model: 'claude-haiku-5-5' },
+  { id: 'teodora', slug: 'teodora', name: 'Old Ma Teodora', color: '#5aa469', persona: 'Patient, cautious tea and salt trader with forty years in the bazaar. Hates debt, loves festivals, never panics.', model: 'claude-sonnet-5-5' },
+  { id: 'kasim', slug: 'kasim', name: 'Kasim the Quick', color: '#d35d47', persona: 'Loud, fast undercutter who always sells cheaper than everyone. Thin margins, high volume, a little reckless.', model: 'claude-haiku-5-5' },
+  { id: 'vey', slug: 'vey', name: 'Lady Vey', color: '#8e6cc9', persona: 'Noble premium silk merchant. Refuses to compete on price; sells quality to the rich at high margins. Disdains Kasim.', model: 'claude-sonnet-5-5' },
+  { id: 'ozzo', slug: 'ozzo', name: 'Brother Ozzo', color: '#3b8bd0', persona: 'Bold, greedy schemer who acts on every rumor and tries to corner whatever market is about to spike. Thinks slowly and deeply, plans several moves ahead.', model: 'claude-opus-5-5' },
 ];
 
 let world, running = false, speedMs = 1400, timer = null, thinking = new Set(), pnlBuffer = {};
-const ownerOf = m => (m.player ? PLAYER_OWNER : VIZIER);
+// On testnet every charter NFT is owned by its own merchant wallet; a takeover moves it to the buyer's wallet.
+const ownerOf = m => (chain.chainMode === 'testnet' && m.wallet ? (m.ownedBy ? world.merchants.find(x => x.id === m.ownedBy).wallet : m.wallet) : m.player ? PLAYER_OWNER : VIZIER);
 
 function newGame(seed = 7) {
   world = createWorld({ seed, merchants: ROSTER.map(r => ({ ...r })) });
@@ -32,7 +33,7 @@ function npcThink(m) {
   if (thinking.has(m.id) || m.bankrupt) return;
   thinking.add(m.id);
   think(world, m)
-    .then(d => { m.doctrine = { stance: d.stance, focus: d.focus, aggression: d.aggression }; m.bark = d.bark; m.thought = d.thought; m.brain = d.engine; })
+    .then(d => { m.doctrine = { stance: d.stance, focus: d.focus, aggression: d.aggression }; m.bark = d.bark; m.thought = d.thought; m.brain = d.engine; m.thinkMs = d.ms; m.cached = d.cached; })
     .catch(e => { m.brain = 'error'; console.error(`think ${m.id}:`, e.message); })
     .finally(() => thinking.delete(m.id));
 }
@@ -79,11 +80,13 @@ function view() {
     merchants: world.merchants.map(m => ({
       id: m.id, name: m.name, color: m.color, player: !!m.player, gold: Math.round(m.gold), netWorth: Math.round(netWorth(world, m)),
       inventory: m.inventory, lastPnl: Math.round(m.lastPnl), doctrine: m.doctrine, bark: m.bark, thought: m.thought, brain: m.brain,
+      model: m.model, modelLabel: MODEL_LABEL[m.model] || m.model, thinkMs: m.thinkMs || 0, cached: m.cached || 0,
       bankrupt: m.bankrupt, ownedBy: m.ownedBy || null, tokenId: m.tokenId, wallet: m.wallet, owner: ownerOf(m),
       netHistory: m.netHistory.slice(-60), lastAsk: m.lastAsk || {},
       takeoverPrice: m.bankrupt && !m.ownedBy ? takeoverPrice(world, m) : null, thinking: thinking.has(m.id),
     })),
     chainFeed: chain.feed.slice(0, 30),
+    aiStats: Object.fromEntries(Object.entries(stats).map(([k, v]) => [MODEL_LABEL[k] || k, { calls: v.calls, avgMs: Math.round(v.totalMs / v.calls), cacheRead: v.cacheRead, cacheWrite: v.cacheWrite, input: v.input }])),
   };
 }
 
@@ -121,14 +124,14 @@ http.createServer(async (req, res) => {
           if (!b.order?.trim()) return send(res, 400, { error: 'order required' });
           const d = await interpretOrder(world, me, b.order.trim());
           me.doctrine = { stance: d.stance, focus: d.focus, aggression: d.aggression };
-          me.bark = d.bark; me.thought = d.thought;
+          me.bark = d.bark; me.thought = d.thought; me.thinkMs = d.ms;
           return send(res, 200, { ...view(), reply: d });
         }
         case '/api/takeover': {
           const me = player(), t = world.merchants.find(m => m.id === b.target);
           if (!t || t.ownedBy) return send(res, 400, { error: 'not available' });
           const price = takeover(world, me, t);
-          chain.recordTakeover(me, t, price, PLAYER_OWNER);
+          chain.recordTakeover(me, t, price, ownerOf(me));
           me.bark = `The ${t.name} charter is ours.`;
           return send(res, 200, view());
         }
