@@ -26,7 +26,7 @@ Deadline: **14 Nov 2026, 23:59 UTC**. Submit **once** at https://nearhackathon.c
 
 ### What did you build? (about 1,500 of the 2,000 characters)
 
-> Bazaar Sovereign is a trading game where every merchant is an NFT that owns its own NEAR wallet. You run one of five houses in a desert bazaar for a 24-day season; four rival houses are AI agents with their own personalities, memories and grudges. They read rumors, race you for Palace orders, haggle in character, and band together or betray you.
+> Bazaar Sovereign is a trading game where every merchant is an NFT that owns its own NEAR wallet. You run one of five houses in a desert bazaar for a 24-day season; four rival houses are AI agents with their own personalities, memories and grudges. They read rumors, race you for Palace orders, haggle in character, cry their wares on a living street, and band together or betray you. Your own street cry is judged by the crowd: a charming one pulls in shoppers.
 >
 > On NEAR testnet, each merchant is a NEP-171 charter NFT whose metadata tracks the live business (net worth, stance, bankruptcy) and which owns a sub-account wallet holding testnet NEAR. Goods are NEP-245 tokens in those wallets. Deals between houses settle atomically through an escrow in our contract: the seller's wallet locks the goods for one buyer at a fixed price, and the buyer's wallet pays and receives them in a single transaction. Bankrupt charters are seized or bought, moving the NFT and the whole business with it. Profits, losses and Moneylenders' Guild loans settle as real transfers between the town treasury and the merchant wallets.
 >
