@@ -29,16 +29,26 @@ frames = [(winpath(f['f']), f['t']) for f in json.load(open(f'{CAP}/frames.json'
 # shots, in CSS pixels of the 1920x1080 page (stills are 2x): pan from box A to box B, both 16:9
 STILL = lambda name, w, a, b: ('still', f'{CAP}/stills/{name}.png', w, a, b)
 CLIP = lambda t0, w, a: ('clip', t0, w, a)
+# the living street: motion clips where the season gave us one, stills where it didn't
+BOARD = (160, 60)
+# day-stamped names change from season to season: take the first one with the prefix
+mk = lambda pre: next((m for m in marks if m.startswith(pre)), pre)
+st = lambda pre: next((f[:-4] for f in sorted(os.listdir(f'{CAP}/stills')) if f.startswith(pre)), pre)
+EVENT = next((m for m in ('event-caravan', 'event-festival', 'event-storm', 'event-monsoon', 'event-drought') if m in marks), None)
+s3_extra = [CLIP(EVENT, 1600, BOARD)] if EVENT else []
+wagon = [CLIP('magnate-wagon', 1600, BOARD)] if 'magnate-wagon' in marks else []
 SEGMENTS = [
-    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), STILL('00-board-day0', 1600, (160, 90), (40, 110))]),
+    ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CLIP('board-idle', 1600, BOARD)]),
     ('s2', 'A charter NFT that does something', [STILL('00-board-day0', 1152, (0, 300), (768, 300)), ('nearblocks',)]),
-    ('s3', 'Rivals with memory and grudges', [STILL('decision-rumor-d1', 1280, (300, 140), (360, 170)), CLIP('decision-palace-d2', 1600, (160, 40))]),
+    ('s3', 'Rivals with memory and grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP(mk('decision-palace'), 1600, (160, 40)), *s3_extra]),
     ('s4', 'Atomic deals through escrow', [STILL('haggle-reply', 960, (470, 262), (490, 282)), STILL('haggle-deal', 960, (480, 266), (480, 280))]),
-    ('s5', 'Day 6: the Magnate arrives', [STILL('scene-arrival', 1280, (320, 290), (320, 330)), STILL('decision-magnate-d6', 1440, (0, 100), (240, 140))]),
-    ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP('raid-d7', 1600, (0, 40))]),
+    ('s5', 'Day 6: the Magnate arrives', [STILL('scene-arrival', 1280, (320, 290), (320, 330)), *wagon, STILL(st('decision-magnate'), 1440, (0, 100), (240, 140))]),
+    ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1600, (0, 40))]),
     ('s7', 'Every move is on-chain', [STILL('scene-leaves', 1280, (320, 290), (320, 330)), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
     ('s8', 'Play free: bazaar.reconscribe.com', [STILL('end-screen', 960, (480, 245), (480, 262)), ('end',)]),
 ]
+# a shot whose still or mark is missing from this capture is dropped rather than failing the build
+SEGMENTS = [(sid, cap, [sh for sh in shots if (sh[0] != 'still' or os.path.exists(sh[1])) and (sh[0] != 'clip' or sh[1] in marks)]) for sid, cap, shots in SEGMENTS]
 
 BAND = "drawbox=y=ih-130:w=iw:h=130:color=0x120b07@0.88:t=fill"
 def caption(cap):

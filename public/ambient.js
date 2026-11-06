@@ -52,7 +52,7 @@
     const meta = SP?.[sheet]?.[i]; if (!meta || !meta.img) return null;
     if (laneY < 110) return null;                    // phones: the cards fill the stage, no street left to walk on
     const far = opts.far ?? Math.random() < 0.35;
-    const v = view(), personH = Math.min((far ? 150 : 200) * v.s, laneY * (far ? 0.75 : 1.05));          // painted townsfolk near the front are ~200 px tall
+    const v = view(), personH = Math.min((far ? 165 : 200) * v.s, laneY * (far ? 0.95 : 1.1));          // painted townsfolk near the front are ~200 px tall
     const k = personH / HUMAN[sheet], w = meta.w * k, h = meta.h * k;
     const dir = opts.dir ?? (Math.random() < 0.5 ? 1 : -1);
     const speed = personH * (opts.speed ?? rnd(0.26, 0.36));
@@ -108,7 +108,9 @@
   function drawWalkers() {
     const sorted = [...walkers].sort((a, b) => (a.far === b.far ? 0 : a.far ? -1 : 1));
     for (const w of sorted) {
-      const base = laneY + (w.far ? -0.02 : 0.42) * w.h;           // far lane stands a touch behind and above
+      // feet always hide behind the stall cards: the painting above them shows awnings and stalls, not ground,
+      // so a visible foot line there reads as floating. The back row is smaller and dimmer, heads near the same line.
+      const base = laneY + (w.far ? 0.36 : 0.5) * w.h;
       const bob = w.wheeled ? Math.abs(Math.sin(w.phase * 0.7)) * w.h * 0.006 : Math.abs(Math.sin(w.phase)) * w.h * 0.022;
       const tilt = w.wheeled ? 0 : Math.sin(w.phase) * 0.018;
       ctx.save();
