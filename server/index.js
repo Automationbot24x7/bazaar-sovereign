@@ -123,7 +123,7 @@ class Game {
       if (qty < 2) continue;
       const total = Math.round(qty * price), name = G[g].name.toLowerCase();
       return { kind: 'offer', title: `${m.name} offers you a deal`,
-        text: `“${lines[m.id][needy ? 1 : 0](name)}” ${qty} ${G[g].units} of ${name} at ${price} coins each (${total} in all; the market pays ${w.prices[g]}). If you accept, both wallets sign intents and it settles on NEAR in one transaction.`,
+        text: `“${lines[m.id][needy ? 1 : 0](name)}” ${qty} ${G[g].units} of ${name} at ${price} coins each (${total} in all; the market pays ${w.prices[g]}). ${this.live ? 'If you accept, both wallets sign intents and it settles on NEAR in one transaction.' : 'If you accept, both wallets sign intents (simulated on this practice table).'}`,
         actions: [{ label: `Accept · ${total} coins`, act: 'acceptoffer', from: m.id, good: g, qty, price }, { label: 'No thanks', act: 'resume' }] };
     }
     return null;
