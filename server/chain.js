@@ -329,6 +329,21 @@ export function makeChain(live, table = 0) {
         });
     },
 
+    // season over: the Vizier mints a keepsake charter of the player's house straight to the player's own
+    // NEAR testnet account, with the season's final state written into it (the player owns it outright)
+    async mintKeepsake(me, account, worth, stance, day) {
+      if (!live) throw new Error('Keepsakes are minted from live tables only');
+      if (!/^([a-z0-9_-]+\.)*[a-z0-9_-]+\.testnet$|^[0-9a-f]{64}$/.test(account)) throw new Error('Give a NEAR testnet account, like yourname.testnet');
+      if (!(await exists(account))) throw new Error(`${account} does not exist on testnet`);
+      const token = `charter-keepsake-${Date.now()}`;
+      return enqueue(ROOT, 'keepsake', async () => {
+        const r = await call(ROOT, 'mint_charter', { token_id: token, owner_id: account, name: me.name, wallet: me.wallet, persona: `Season keepsake: ${me.name}, day ${day}, finished with ${Math.round(worth)} coins of net worth.`, media: `${PUBLIC_URL}/charter/${token}.svg` }, { deposit: nearToYocto('0.02') });
+        await call(ROOT, 'update_charters', { day, updates: [{ token_id: token, net_worth: Math.round(worth), gold: Math.round(me.gold), stance: `season keepsake · ${stance}`, bankrupt: !!me.bankrupt }] }, { gas: 50 });
+        push('mint', `A keepsake of your house is minted to ${account}: a charter NFT you own outright, with this season written into it.`, hashOf(r));
+        return token;
+      });
+    },
+
     // the player's browser registers its own signing key for the player's charter (stays in the browser)
     registerPlayerKey(me, pk) {
       if (!live) return;

@@ -62,13 +62,14 @@ function draw(token, s, img) {
 }
 
 export async function charterCard(token) {
-  if (!/^charter-[a-z]+(-t\d+)?$/.test(token)) return null;
+  if (!/^charter-[a-z]+(-t\d+)?$|^charter-keepsake-\d+$/.test(token)) return null;
   const hit = cache.get(token);
   if (hit && Date.now() - hit.at < 20_000) return hit.svg;
   if (!testnetAvailable && !process.env.NEAR_CONTRACT_ID) return null;
   const s = await chainState(token).catch(() => null);
   if (!s) return hit?.svg || null;
-  const svg = draw(token, s, await portrait(token.replace(/^charter-/, '').replace(/-t\d+$/, '')));
+  const art = /^charter-keepsake-/.test(token) ? 'player' : token.replace(/^charter-/, '').replace(/-t\d+$/, '');
+  const svg = draw(token, s, await portrait(art));
   cache.set(token, { at: Date.now(), svg });
   return svg;
 }

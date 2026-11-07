@@ -205,8 +205,20 @@ function end() {
     : r.reason === 'magnate' ? `${S.magnate?.name || 'The Magnate'} still holds his monopoly on ${(r.magnate?.goods || []).map(g => goodName(g).toLowerCase()).join(' and ')}. The houses squabbled while he bought the bazaar; nobody wins this season. (You were #${r.rank} by net worth.)` : `You finished #${r.rank} of ${r.table.length} after ${r.day} days.`;
   $('#endTable').innerHTML = '<tr><th>#</th><th>House</th><th>Net worth</th><th>Charters</th><th>Palace orders</th></tr>' + r.table.map((t, i) => `<tr class="${t.id === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${esc(t.name)}${t.vassalOf ? ` <span class="muted">(vassal of ${esc(merchant(t.vassalOf).name)})</span>` : t.out ? ' <span class="muted">(bankrupt)</span>' : ''}</td><td>${dh(t.netWorth)}</td><td>${'♛'.repeat(t.charters)}</td><td>${t.contracts}</td></tr>`).join('');
   $('#endProof').innerHTML = S.chain.mode === 'testnet' ? `The final state is settling on NEAR testnet — <a href="${S.chain.explorer}/address/${S.chain.contract}" target="_blank" rel="noopener">see the charters ↗</a>` : '';
+  $('#keepForm').hidden = S.chain.mode !== 'testnet';
   $('#end').showModal();
 }
+$('#keepForm').onsubmit = async e => {
+  e.preventDefault();
+  const btn = $('#keepBtn'), note = $('#keepNote');
+  btn.disabled = true; note.textContent = 'Minting on NEAR testnet…';
+  try {
+    const r = await api('/api/keepsake', { account: $('#keepAcct').value });
+    render(r);
+    const tok = r.keepsake?.token;
+    note.innerHTML = tok && tok !== 'minted' ? `Minted to <b>${esc(r.keepsake.account)}</b>: <a href="${S.chain.explorer}/nft-token/${S.chain.contract}/${esc(tok)}" target="_blank" rel="noopener">see it on NearBlocks ↗</a> · <a href="/charter/${esc(tok)}.svg" target="_blank" rel="noopener">its card ↗</a>` : 'Minted.';
+  } catch (err) { note.textContent = err.message; btn.disabled = false; }
+};
 
 // ---------- key-moment decisions ----------
 function decision() {

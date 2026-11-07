@@ -510,6 +510,7 @@ const body = req => new Promise(r => { let d = ''; req.on('data', c => { d += c;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.json': 'application/json', '.mp4': 'video/mp4' };
 const lastOrder = new Map();
 
+let keepsakes = 0;   // minted since the server started
 const AI_ROUTES = new Set(['/api/offer', '/api/order', '/api/pact', '/api/cry']);
 http.createServer(async (req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
@@ -541,6 +542,20 @@ http.createServer(async (req, res) => {
           if (!/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(pk)) throw new Error('Not an ed25519 public key');
           g.chain.registerPlayerKey(me, pk);
           return send(res, 200, g.view());
+        }
+        case '/api/keepsake': {
+          // one keepsake per finished live season, and a small global cap (minting stores data on chain)
+          if (!w.over) throw new Error('The season is not over yet');
+          if (g.keepsake) throw new Error('This season already has its keepsake');
+          if (keepsakes >= Number(process.env.KEEPSAKE_CAP || 15)) throw new Error('No keepsakes left today; come back tomorrow');
+          if (!allow(req, 'keepsake', 3)) throw tooMany('keepsakes');
+          const account = String(b.account || '').trim().toLowerCase();
+          g.keepsake = 'pending';
+          try {
+            const token = await g.chain.mintKeepsake(me, account, netWorth(w, me), me.doctrine.stance, w.day);
+            keepsakes++; g.keepsake = token || 'minted';
+          } catch (e) { g.keepsake = null; throw e; }
+          return send(res, 200, { ...g.view(), keepsake: { account, token: g.keepsake } });
         }
         case '/api/sign': { g.chain.completeSign(String(b.id || ''), b.signature); return send(res, 200, g.view()); }
         case '/api/cry': {

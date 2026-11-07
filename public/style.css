@@ -315,3 +315,4 @@ dialog a:hover { color: #fff1c9; }
 .insp-card { width: 64px; border-radius: 6px; display: block; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
 .feed li.kind-deal { color: #e3d4ff; background: rgba(169,139,224,.10); border-left: 3px solid #a98be0; padding-left: 8px; }
 .feed li.kind-intent { color: #b8e6c6; } .feed li.kind-vault { color: #ffd978; }
+.keep { margin: 12px 0 4px; display: grid; gap: 6px; text-align: left; } .keep label { font-size: 13px; color: var(--parch); }

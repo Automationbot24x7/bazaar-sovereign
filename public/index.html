@@ -173,6 +173,11 @@
     <p id="endText"></p>
     <table class="standings" id="endTable"></table>
     <div id="endProof" class="muted"></div>
+    <form id="keepForm" class="keep" hidden>
+      <label for="keepAcct">Keep your charter: mint a keepsake of your house, with this season written into it, to your own NEAR testnet account.</label>
+      <div class="name-row"><input id="keepAcct" placeholder="yourname.testnet" autocomplete="off" spellcheck="false" /><button class="primary" id="keepBtn">Mint keepsake</button></div>
+      <div class="muted" id="keepNote"></div>
+    </form>
     <div class="end-actions">
       <button class="primary" id="again">Play another season</button>
       <form method="dialog"><button class="ghost">Look around</button></form>
