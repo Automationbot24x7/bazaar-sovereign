@@ -319,8 +319,10 @@ export function makeChain(live, table = 0) {
             sell = await sideSign(seller, { signer_id: sOwner, charter: seller.tokenId, deadline_ms, near: price.toString(), goods: { [good]: -qty }, memo }, `sell ${qty} ${good} for ${fmtNear(total)} NEAR`);
             buy = await sideSign(buyer, { signer_id: bOwner, charter: buyer.tokenId, deadline_ms, near: (-price).toString(), goods: { [good]: qty }, memo }, `buy ${qty} ${good} for ${fmtNear(total)} NEAR`);
           } catch (e) { push('error', `Deal not settled: ${e.message}`); return; }
-          const who = (m, txt) => (m.player && browserKey.ready ? txt.replace(/^Your wallet signs|^Your wallet|^your wallet/i, `Your browser signs with its own key (${short(browserKey.pk)})`) : txt);
-          push('intent', who(seller, sellText), null); push('intent', who(buyer, buyText), null);
+          // say who signed each side: the player's browser (its own key) or the house's wallet
+          const by = m => (m.player && browserKey.ready ? `Your browser, with its own key ${short(browserKey.pk)},` : m.player ? 'Your wallet' : `${m.name}'s wallet`);
+          push('intent', `${by(seller)} signs an intent: ${qty} ${good} out, ${fmtNear(total)} NEAR in (NEP-413).`, null);
+          push('intent', `${by(buyer)} signs the matching intent: ${fmtNear(total)} NEAR out, ${qty} ${good} in.`, null);
           return enqueue(TREASURY, 'settle intents', async () => {
             push('deal', `${settleText} Both sides net to zero: ${qty} ${good} and ${fmtNear(total)} NEAR.`, hashOf(await call(TREASURY, 'execute_intents', { intents: [sell, buy] }, { gas: 60 })));
           });
