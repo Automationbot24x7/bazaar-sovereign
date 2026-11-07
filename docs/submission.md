@@ -7,7 +7,7 @@ Deadline: **14 Nov 2026, 23:59 UTC**. Submit **once** at https://nearhackathon.c
 1. **HTTPS live**: https://bazaar.reconscribe.com (keep it up until at least 18 Nov, ideally 25 Nov). ✅
 2. **Make the GitHub repo public**: https://github.com/Automationbot24x7/bazaar-sovereign (judges can't open a private repo; LICENSE is MIT). ✅
 3. **Upload the video** (`art-src/video/bazaar-sovereign-demo.mp4`) to the ReconScribe YouTube channel (optional, but handy for the README). ⬜
-4. **Post on X** from the ReconScribe account with the video attached (text below). Copy the post's link. ⬜
+4. **Post on X** from the ReconScribe account with the video attached (text below). Copy the post's link. ✅ https://x.com/ReconScribe/status/2118951990667710788
 5. **Fill in the form** with the answers below and the post link. ⬜
 
 ## Form answers
@@ -21,7 +21,7 @@ Deadline: **14 Nov 2026, 23:59 UTC**. Submit **once** at https://nearhackathon.c
 | Tracks | Games With Real Economies (`games`), NFTs That Do Something (`nfts`), Agent Economy (`agents`), AI Swarms (`swarms`) |
 | NEAR wallet (prize payout, mainnet) | `uncrop.near` |
 | Repository | https://github.com/Automationbot24x7/bazaar-sovereign |
-| Demo post | (link to the X post) |
+| Demo post | https://x.com/ReconScribe/status/2118951990667710788 |
 | Website | https://bazaar.reconscribe.com |
 
 ### What did you build? (under the 2,000 characters)
