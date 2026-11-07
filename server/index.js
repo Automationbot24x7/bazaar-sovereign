@@ -535,6 +535,14 @@ http.createServer(async (req, res) => {
       const b = await body(req);
       const w = g.world, me = g.me();
       switch (p) {
+        case '/api/key': {
+          // the player's browser registers the ed25519 key it made and keeps (never sent here)
+          const pk = String(b.public_key || '');
+          if (!/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(pk)) throw new Error('Not an ed25519 public key');
+          g.chain.registerPlayerKey(me, pk);
+          return send(res, 200, g.view());
+        }
+        case '/api/sign': { g.chain.completeSign(String(b.id || ''), b.signature); return send(res, 200, g.view()); }
         case '/api/cry': {
           // the player's crier shouts once a day; the crowd judges how well it lands
           const text = String(b.text ?? '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);

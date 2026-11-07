@@ -510,13 +510,29 @@ impl Contract {
         let account = env::predecessor_account_id();
         require!(account == env::signer_account_id(), "Call this directly from the account");
         let pk = String::from(&env::signer_account_pk());
+        self.add_signer(account, pk);
+    }
+
+    /// The calling account registers an ed25519 key that never touches the chain itself, e.g. a key a
+    /// player's browser generated and keeps; intents signed with it then count as the account's.
+    /// An account keeps its 4 most recent keys.
+    pub fn register_signer_key(&mut self, public_key: String) {
+        let pk = PublicKey::from_str(&public_key).unwrap_or_else(|_| env::panic_str("Bad public key"));
+        require!(pk.curve_type() == CurveType::ED25519, "Only ed25519 keys");
+        self.add_signer(env::predecessor_account_id(), String::from(&pk));
+    }
+
+    fn add_signer(&mut self, account: AccountId, pk: String) {
         let mut keys = self.signers.get(&account).cloned().unwrap_or_default();
-        if !keys.contains(&pk) {
-            require!(keys.len() < 4, "At most 4 signing keys");
-            keys.push(pk.clone());
-            self.signers.insert(account.clone(), keys);
-            event("signer_registered", json!({ "account_id": account, "public_key": pk }));
+        if keys.contains(&pk) {
+            return;
         }
+        if keys.len() >= 4 {
+            keys.remove(0);
+        }
+        keys.push(pk.clone());
+        self.signers.insert(account.clone(), keys);
+        event("signer_registered", json!({ "account_id": account, "public_key": pk }));
     }
 
     pub fn signers_of(&self, account_id: AccountId) -> Vec<String> {
@@ -1011,6 +1027,23 @@ mod tests {
         let buy = sign(&kb.0, &kb.1, &intent(&accounts(3), "charter-b", -600, r#""silk":1"#), 8);
         let buy_fix = SignedIntent { ..buy };
         c.execute_intents(vec![sell, buy_fix]);
+    }
+
+    #[test]
+    fn a_key_held_elsewhere_can_sign_for_the_account() {
+        let (mut c, ka, _kb) = market();
+        // B registers a key its owner keeps off-chain (say, in a browser); only that key signs B's side
+        let kb2 = key(9);
+        testing_env!(ctx(accounts(3)).build());
+        c.register_signer_key(kb2.1.clone());
+        assert!(c.signers_of(accounts(3)).contains(&kb2.1));
+        let sell = sign(&ka.0, &ka.1, &intent(&accounts(2), "charter-a", 300, r#""silk":-2"#), 11);
+        let buy = sign(&kb2.0, &kb2.1, &intent(&accounts(3), "charter-b", -300, r#""silk":2"#), 12);
+        c.execute_intents(vec![sell, buy]);
+        assert_eq!(c.mt_balance_of(accounts(3), "silk".into()).0, 2);
+        // an account keeps its 4 newest keys
+        for seed in 20..25u8 { c.register_signer_key(key(seed).1); }
+        assert_eq!(c.signers_of(accounts(3)).len(), 4);
     }
 
     #[test]

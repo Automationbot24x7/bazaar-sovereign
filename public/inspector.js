@@ -50,7 +50,7 @@
       if (md.media && /\/charter\//.test(md.media)) row.querySelector('.portrait').outerHTML = `<a href="${esc(md.media)}" target="_blank" rel="noopener" title="The NFT's own image, drawn from its on-chain state"><img class="insp-card" src="${esc(md.media)}" alt="${esc(m.name)} charter card"></a>`;
       out.innerHTML = `<div><b>Charter NFT</b> <a href="${ex}/nft-token/${chain.contract}/${m.tokenId}" target="_blank" rel="noopener">${esc(m.tokenId)} ↗</a> · owner <a href="${ex}/address/${nft?.owner_id}" target="_blank" rel="noopener">${esc(nft?.owner_id || '?')}</a></div>
         <div class="insp-md">“${esc(md.description || md.title || '')}”</div>
-        <div><b>Charter vault</b> ${near(vault)} NEAR held by the NFT itself; only its owner can spend it${keys.length ? ` · owner signs intents with <code>${esc(keys[0].slice(0, 16))}…</code>` : ''}</div>
+        <div><b>Charter vault</b> ${near(vault)} NEAR held by the NFT itself; only its owner can spend it${keys.length ? ` · ${m.player && keys.includes(window.bazaarKey) ? `you sign your side in this browser with <code>${esc(window.bazaarKey.slice(0, 16))}…</code> (the key never leaves it)` : `owner signs intents with <code>${esc(keys.at(-1).slice(0, 16))}…</code>`}` : ''}</div>
         <div><b>Stall wallet</b> <a href="${ex}/address/${m.wallet}" target="_blank" rel="noopener">${esc(m.wallet)} ↗</a> · ${near(acct.amount)} NEAR</div>
         <div><b>Goods on chain (NEP-245)</b> ${goods}</div>`;
     } catch (e) { out.textContent = `Could not read the chain right now (${e.message}).`; }

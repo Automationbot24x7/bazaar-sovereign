@@ -7,7 +7,7 @@
       "compiler": "rustc 1.95.0",
       "builder": "cargo-near cargo-near-build 0.11.5"
     },
-    "wasm_hash": "7CJg5KRa1MkvzRRrE2rV19MKpN1BfkBmWRCAaPMagkAE"
+    "wasm_hash": "A7gqFQLJDPtY3BzytfcX9QvPeKGH64zuDDKN3YbVXV9Q"
   },
   "body": {
     "functions": [
@@ -986,6 +986,22 @@
         "name": "register_signer",
         "doc": " The calling account registers the access key that signed this transaction as an intent-signing key.\n Calling with the key itself proves the account controls it.",
         "kind": "call"
+      },
+      {
+        "name": "register_signer_key",
+        "doc": " The calling account registers an ed25519 key that never touches the chain itself, e.g. a key a\n player's browser generated and keeps; intents signed with it then count as the account's.\n An account keeps its 4 most recent keys.",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "public_key",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
       },
       {
         "name": "set_media",

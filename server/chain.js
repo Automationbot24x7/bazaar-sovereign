@@ -17,7 +17,7 @@
 //    execute_intents, which checks both signatures and settles NEAR and goods in one transaction
 //    (the older escrow, offer_goods + accept_goods, is kept for charters the Magnate holds);
 //  * charter sales: the Vizier lists, the buyer's wallet calls buy_charter with the price attached.
-import { Account, JsonRpcProvider, FailoverRpcProvider, KeyPair, actions, nearToYocto, yoctoToNear } from 'near-api-js';
+import { Account, JsonRpcProvider, FailoverRpcProvider, KeyPair, PublicKey, actions, nearToYocto, yoctoToNear } from 'near-api-js';
 import { readFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -66,6 +66,7 @@ const VAULT_FLOAT = process.env.VAULT_FLOAT_NEAR || '0.03';
 const u32 = n => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
 const bstr = str => { const d = Buffer.from(str, 'utf8'); return Buffer.concat([u32(d.length), d]); };
 let signingKey = null;
+const nep413Bytes = (message, nonce) => Buffer.concat([u32(2147484061), bstr(message), Buffer.from(nonce), bstr(CONTRACT), Buffer.from([0])]);
 function signIntent(intent) {
   signingKey ||= KeyPair.fromString(KEY);
   const message = JSON.stringify(intent), nonce = randomBytes(32);
@@ -125,6 +126,19 @@ export function makeChain(live, table = 0) {
   const walletOf = slug => (live ? `${slug}${sfx}.${ROOT}` : `${slug}.bazaar.near`);
   const magnateWallet = walletOf('magnate');
   let ownerFn = m => m.wallet;   // who holds each charter right now (set by setupMerchants)
+  // the player's side of a deal is signed in the player's own browser with a key the server never sees
+  const browserKey = { pk: null, ready: false };
+  const signRequests = new Map();
+  const short = pk => `${pk.slice(0, 14)}…`;
+  function browserSign(intent, what) {
+    const message = JSON.stringify(intent), nonce = [...randomBytes(32)], id = randomBytes(6).toString('hex');
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { signRequests.delete(id); reject(new Error('your browser did not sign it in time, so it was not settled on chain')); }, 90_000);
+      signRequests.set(id, { id, message, nonce, recipient: CONTRACT, what, resolve: sig => { clearTimeout(timer); signRequests.delete(id); resolve({ message, nonce, recipient: CONTRACT, public_key: browserKey.pk, signature: sig }); } });
+    });
+  }
+  // a side of a deal: the player's browser signs if it registered a key, otherwise the house's wallet key
+  const sideSign = (m, intent, what) => (m.player && browserKey.ready ? browserSign(intent, what) : Promise.resolve(signIntent(intent)));
   const send = (from, to, amount) => acct(from).signAndSendTransaction({ receiverId: to, actions: [actions.transfer(amount)], waitUntil: 'INCLUDED' });
   const call = (signer, method, args, { deposit = 0n, gas = 100 } = {}) =>
     acct(signer).callFunctionRaw({ contractId: CONTRACT, methodName: method, args, deposit, gas: TGAS(gas) });
@@ -171,7 +185,7 @@ export function makeChain(live, table = 0) {
     live,
     feed,
     pending: () => (live ? pendingTx() : 0),
-    info: () => ({ mode: live ? 'testnet' : 'practice', table: live ? table + 1 : null, testnetAvailable, root: ROOT || null, contract: live ? CONTRACT : null, treasury: live ? TREASURY : null, explorer: EXPLORER, goldToNear: GOLD_TO_NEAR, pending: live ? pendingTx() : 0 }),
+    info: () => ({ signRequests: [...signRequests.values()].map(({ id, message, nonce, recipient, what }) => ({ id, message, nonce, recipient, what })), browserKey: browserKey.pk ? { pk: browserKey.pk, ready: browserKey.ready } : null, mode: live ? 'testnet' : 'practice', table: live ? table + 1 : null, testnetAvailable, root: ROOT || null, contract: live ? CONTRACT : null, treasury: live ? TREASURY : null, explorer: EXPLORER, goldToNear: GOLD_TO_NEAR, pending: live ? pendingTx() : 0 }),
     explorerAccount: id => (live ? `${EXPLORER}/address/${id}` : null),
     magnateWallet,
     magnate: { name: 'Baltazar', wallet: magnateWallet, slug: 'magnate', player: false, tokenId: undefined },
@@ -298,13 +312,44 @@ export function makeChain(live, table = 0) {
           await ensureFunds({ ...buyer, wallet: bOwner }, 0, (Number(yoctoToNear(add)) + 0.05).toFixed(4));
           push('vault', `${buyer.player ? 'Your' : buyer.name + "'s"} charter vault is topped up to cover the deal.`, hashOf(await call(bOwner, 'vault_deposit', { token_id: buyer.tokenId }, { deposit: add, gas: 10 })));
         }))
-        .then(() => enqueue(TREASURY, 'settle intents', async () => {
+        .then(async () => {
           const deadline_ms = Date.now() + 15 * 60_000, memo = `${qty} ${good} for ${Math.round(total)} coins`;
-          const sell = signIntent({ signer_id: sOwner, charter: seller.tokenId, deadline_ms, near: price.toString(), goods: { [good]: -qty }, memo });
-          const buy = signIntent({ signer_id: bOwner, charter: buyer.tokenId, deadline_ms, near: (-price).toString(), goods: { [good]: qty }, memo });
-          push('intent', sellText, null); push('intent', buyText, null);
-          push('deal', settleText, hashOf(await call(TREASURY, 'execute_intents', { intents: [sell, buy] }, { gas: 60 })));
-        }));
+          let sell, buy;
+          try {
+            sell = await sideSign(seller, { signer_id: sOwner, charter: seller.tokenId, deadline_ms, near: price.toString(), goods: { [good]: -qty }, memo }, `sell ${qty} ${good} for ${fmtNear(total)} NEAR`);
+            buy = await sideSign(buyer, { signer_id: bOwner, charter: buyer.tokenId, deadline_ms, near: (-price).toString(), goods: { [good]: qty }, memo }, `buy ${qty} ${good} for ${fmtNear(total)} NEAR`);
+          } catch (e) { push('error', `Deal not settled: ${e.message}`); return; }
+          const who = (m, txt) => (m.player && browserKey.ready ? txt.replace(/^Your wallet signs|^Your wallet|^your wallet/i, `Your browser signs with its own key (${short(browserKey.pk)})`) : txt);
+          push('intent', who(seller, sellText), null); push('intent', who(buyer, buyText), null);
+          return enqueue(TREASURY, 'settle intents', async () => {
+            push('deal', `${settleText} Both sides net to zero: ${qty} ${good} and ${fmtNear(total)} NEAR.`, hashOf(await call(TREASURY, 'execute_intents', { intents: [sell, buy] }, { gas: 60 })));
+          });
+        });
+    },
+
+    // the player's browser registers its own signing key for the player's charter (stays in the browser)
+    registerPlayerKey(me, pk) {
+      if (!live) return;
+      if (browserKey.pk === pk && browserKey.ready) return;
+      browserKey.pk = pk; browserKey.ready = false;
+      const owner = ownerFn(me);
+      enqueue(owner, 'register browser key', async () => {
+        const keys = await view('signers_of', { account_id: owner }).catch(() => []);
+        const r = keys.includes(pk) ? null : await call(owner, 'register_signer_key', { public_key: pk }, { gas: 10 });
+        if (browserKey.pk !== pk) return;
+        browserKey.ready = true;
+        push('intent', `Your browser made its own signing key (${short(pk)}) and your charter registered it: from now on your side of every deal is signed in your browser; the server never sees that key.`, r ? hashOf(r) : null);
+      });
+    },
+    // the browser returns a signature; check it before spending gas on it
+    completeSign(id, signature) {
+      const r = signRequests.get(id);
+      if (!r) throw new Error('Nothing to sign with that id');
+      const sig = Uint8Array.from(signature || []);
+      if (sig.length !== 64) throw new Error('A signature is 64 bytes');
+      const hash = createHash('sha256').update(nep413Bytes(r.message, r.nonce)).digest();
+      if (!PublicKey.fromString(browserKey.pk).verify(hash, sig)) throw new Error('That signature does not match your key');
+      r.resolve([...sig]);
     },
 
     // a fee one house pays another (e.g. to join a pact): two NEAR-only intents, one solver transaction
@@ -319,12 +364,15 @@ export function makeChain(live, table = 0) {
         const add = price - vault + nearToYocto(VAULT_FLOAT);
         await ensureFunds({ ...payer, wallet: pOwner }, 0, (Number(yoctoToNear(add)) + 0.05).toFixed(4));
         await call(pOwner, 'vault_deposit', { token_id: payer.tokenId }, { deposit: add, gas: 10 });
-      }).then(() => enqueue(TREASURY, 'settle fee', async () => {
+      }).then(async () => {
         const deadline_ms = Date.now() + 15 * 60_000, memo = why;
-        const a = signIntent({ signer_id: pOwner, charter: payer.tokenId, deadline_ms, near: (-price).toString(), goods: {}, memo });
-        const b = signIntent({ signer_id: qOwner, charter: payee.tokenId, deadline_ms, near: price.toString(), goods: {}, memo });
-        push('intent', text, hashOf(await call(TREASURY, 'execute_intents', { intents: [a, b] }, { gas: 60 })));
-      }));
+        let a, b;
+        try {
+          a = await sideSign(payer, { signer_id: pOwner, charter: payer.tokenId, deadline_ms, near: (-price).toString(), goods: {}, memo }, `pay ${fmtNear(amount)} NEAR ${why}`);
+          b = signIntent({ signer_id: qOwner, charter: payee.tokenId, deadline_ms, near: price.toString(), goods: {}, memo });
+        } catch (e) { push('error', `Fee not settled: ${e.message}`); return; }
+        return enqueue(TREASURY, 'settle fee', async () => push('deal', text, hashOf(await call(TREASURY, 'execute_intents', { intents: [a, b] }, { gas: 60 }))));
+      });
     },
 
     // goods deal between houses, settled atomically through the contract's escrow:
