@@ -29,7 +29,9 @@ If all three live tables are busy you get a practice table (identical game, simu
 | **Agent Economy** | Each AI house earns, spends, negotiates prices with the player and with each other, pays and asks fees to join pacts, borrows from the Guild, and signs its deals with its own wallet key. |
 | **AI Swarms** | Five agents (four rivals and the magnate) in one economy: coalition-building against the magnate, AI-to-AI goods deals and intent-based settlement between agents. |
 
-**Not used:** Chain Signatures and social login. Players need no account; the game server holds the merchant wallet keys (custodial, testnet). The contract checks every signature, nonce, deadline and charter ownership, so a key can only move what the charter it owns controls.
+**Who signs what.** Your side of every deal is signed **in your own browser**: on a live table the page makes an ed25519 key with WebCrypto, keeps it in the browser, and your charter's wallet registers its public half on the contract (`register_signer_key`). When a deal or fee involves you, the browser signs the NEP-413 intent and sends back only the signature. The AI houses sign with their own wallet keys, which the game server holds (custodial, testnet), as it holds the stall wallets for transfers. The contract checks every signature, nonce, deadline and charter ownership, so a key can only move what the charter its account owns controls.
+
+**Not used:** Chain Signatures and social login (players need no account at all).
 
 ## What is on chain (NEAR testnet)
 
@@ -38,7 +40,7 @@ If all three live tables are busy you get a practice table (identical game, simu
 | **Merchant charter** | A NEP-171 NFT on our contract (`contract/`). Metadata `extra` holds the live business: wallet, net worth, gold, stance, day, bankrupt, takeovers, absorbed charters. Rewritten every 5 game days (`update_charters`). |
 | **Charter vault** | NEAR held by the charter itself inside the contract (`vault_deposit`, `vault_of`). Only the NFT's current owner can withdraw it (`vault_withdraw`) or sign intents that spend it. Each house funds its charter's vault at the start of a season. |
 | **Stall wallet** | Each charter is bound to its own NEAR sub-account (e.g. `kasim.<root>.testnet`) holding the house's working capital and its NEP-245 goods. |
-| **Deals between houses (intents)** | The seller's wallet signs a **NEP-413** message: "N goods out, P NEAR in"; the buyer's wallet signs the mirror image. A solver submits the pair to `execute_intents`, which verifies both ed25519 signatures over the standard NEP-413 payload, the deadlines, one-use nonces and that each signer owns the charter it spends from, requires NEAR and every good to net to zero, then moves NEAR between the two charters' vaults and the goods between their wallets in one transaction. Player ↔ AI and AI ↔ AI deals both settle this way; pact fees too. |
+| **Deals between houses (intents)** | The seller signs a **NEP-413** message: "N goods out, P NEAR in"; the buyer signs the mirror image (your side in your browser, an AI side with its wallet key). A solver submits the pair to `execute_intents`, which verifies both ed25519 signatures over the standard NEP-413 payload, the deadlines, one-use nonces and that each signer owns the charter it spends from, requires NEAR and every good to net to zero, then moves NEAR between the two charters' vaults and the goods between their wallets in one transaction. Player ↔ AI and AI ↔ AI deals both settle this way; pact fees too. |
 | **Goods** | Saffron, silk, tea and salt are NEP-245 multi-tokens. Buying from suppliers mints and selling to townsfolk burns (mirrored by the Vizier with `sync_goods` every 5 days and before every deal); rats burn ruined stock the same way. |
 | **Profit and loss** | Every 5 game days each house's P&L settles as a real NEAR transfer between the town treasury and its wallet (1 coin = 0.00002 NEAR). |
 | **Guild loans** | A Moneylenders' Guild bond is paid out by the treasury to the borrower's wallet; repayments (fee plus daily interest) go back wallet to treasury. |
@@ -93,6 +95,7 @@ npm start
 | `vault_deposit(token_id)` | anyone | adds the attached NEAR to a charter's own vault |
 | `vault_withdraw(token_id, amount)` | the charter's owner | takes NEAR out of the charter's vault |
 | `register_signer()` | any account | registers the key that signed this call as its intent-signing key |
+| `register_signer_key(public_key)` | any account | registers a key held elsewhere (e.g. a player's browser) as its intent-signing key; an account keeps its 4 newest keys |
 | `execute_intents(intents[])` | anyone (a solver) | verifies 2–16 NEP-413 signed intents and settles them atomically |
 | `sync_goods(holdings[])` | Vizier | mirrors supplier purchases and retail sales (mint / burn) |
 | `offer_goods` · `accept_goods` · `cancel_goods` | seller / buyer wallets | escrowed goods deal (kept as a fallback, e.g. for charters the magnate holds) |
@@ -100,7 +103,7 @@ npm start
 | `mt_transfer` · `mt_batch_transfer` | goods holder | NEP-245 transfers |
 | `nft_token` · `get_charter` · `vault_of` · `signers_of` · `nonce_used` · `mt_balance_of` · `mt_batch_balance_of` · `get_listing` · `get_offer` | anyone | views |
 
-Build and test (Linux/WSL): `bash contract/build.sh` → `contract/out/bazaar_charters.wasm`. **19 unit tests** cover minting, updates and takeovers, oracle-only access, goods transfers, charter purchases, the escrow, the v3 → v4 migration, and intents: a deal settled by two signed intents, a set that does not net to zero, a replayed nonce, a tampered message, and a charter's vault following the NFT to its new owner.
+Build and test (Linux/WSL): `bash contract/build.sh` → `contract/out/bazaar_charters.wasm`. **20 unit tests** cover minting, updates and takeovers, oracle-only access, goods transfers, charter purchases, the escrow, the v3 → v4 migration, and intents: a deal settled by two signed intents, a set that does not net to zero, a replayed nonce, a tampered message, a key held outside the chain signing for its account, and a charter's vault following the NFT to its new owner.
 
 ## How the economy works
 
@@ -117,7 +120,9 @@ server/engine.js     market simulation (pure, seeded, deterministic)
 server/brains.js     AI rivals, negotiation, factor orders, street-cry judge (+ offline fallback)
 server/chain.js      NEAR: wallets, vaults, NEP-413 intents, settlements, goods mirror, charter mint/update/sales
 server/index.js      game loop + HTTP API
-public/              game UI (vanilla JS, no build step): game.js, ambient.js (living street), inspector.js (live chain reads)
+public/              game UI (vanilla JS, no build step): game.js, ambient.js (living street), inspector.js (live chain reads),
+                     signer.js (your browser's own key: signs your side of each deal)
+server/card.js       each charter NFT's image, drawn from its on-chain state
 contract/            Rust contract + tests
 tools/               deploy, intent smoke test, balance harness, art/voice/video generation
 ```
