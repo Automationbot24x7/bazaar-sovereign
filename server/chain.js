@@ -206,7 +206,7 @@ export function makeChain(live, table = 0) {
         });
         await enqueue(ROOT, `charter ${m.tokenId}`, async () => {
           const existing = await view('nft_token', { token_id: m.tokenId }).catch(() => null);
-          const media = `${PUBLIC_URL}/art/${m.art || m.slug}.webp`;
+          const media = `${PUBLIC_URL}/charter/${m.tokenId}.svg`;   // a living card drawn from the NFT's own state
           if (existing && existing.metadata?.media !== media && !/localhost/.test(PUBLIC_URL)) {
             await call(ROOT, 'set_media', { token_id: m.tokenId, media }, { gas: 30 }).catch(e => push('error', `charter art for ${m.name}: ${e.message?.slice(0, 80)}`));
           }
@@ -217,7 +217,7 @@ export function makeChain(live, table = 0) {
             }
             return;
           }
-          const r = await call(ROOT, 'mint_charter', { token_id: m.tokenId, owner_id: ownerOf(m), name: m.player ? 'Your House' : m.name, wallet: m.wallet, persona: m.persona, media: `${PUBLIC_URL}/art/${m.art || m.slug}.webp` }, { deposit: nearToYocto('0.02') });
+          const r = await call(ROOT, 'mint_charter', { token_id: m.tokenId, owner_id: ownerOf(m), name: m.player ? 'Your House' : m.name, wallet: m.wallet, persona: m.persona, media: `${PUBLIC_URL}/charter/${m.tokenId}.svg` }, { deposit: nearToYocto('0.02') });
           push('mint', `${m.player ? 'Your' : m.name + "'s"} charter is minted. The stall now owns its own wallet.`, hashOf(r));
         });
       }

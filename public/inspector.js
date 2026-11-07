@@ -47,6 +47,7 @@
         const onChain = Number(bal[i] || 0), inGame = Math.floor(m.inventory?.[g] || 0);
         return `<span title="On chain ${onChain} · in game now ${inGame} (stock is mirrored to the chain every 5 days)">${g} <b>${onChain}</b>${onChain !== inGame ? `<small> (now ${inGame})</small>` : ''}</span>`;
       }).join(' ');
+      if (md.media && /\/charter\//.test(md.media)) row.querySelector('.portrait').outerHTML = `<a href="${esc(md.media)}" target="_blank" rel="noopener" title="The NFT's own image, drawn from its on-chain state"><img class="insp-card" src="${esc(md.media)}" alt="${esc(m.name)} charter card"></a>`;
       out.innerHTML = `<div><b>Charter NFT</b> <a href="${ex}/nft-token/${chain.contract}/${m.tokenId}" target="_blank" rel="noopener">${esc(m.tokenId)} ↗</a> · owner <a href="${ex}/address/${nft?.owner_id}" target="_blank" rel="noopener">${esc(nft?.owner_id || '?')}</a></div>
         <div class="insp-md">“${esc(md.description || md.title || '')}”</div>
         <div><b>Charter vault</b> ${near(vault)} NEAR held by the NFT itself; only its owner can spend it${keys.length ? ` · owner signs intents with <code>${esc(keys[0].slice(0, 16))}…</code>` : ''}</div>

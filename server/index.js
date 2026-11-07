@@ -10,6 +10,7 @@ import {
 } from './engine.js';
 import { think, interpretOrder, answerOffer, answerPact, judgeCry, aiOn, stats, MODEL_LABEL, spend } from './brains.js';
 import { makeChain, testnetAvailable } from './chain.js';
+import { charterCard } from './card.js';
 
 const PORT = process.env.PORT || 3000;
 const SETTLE_EVERY = 5;
@@ -519,6 +520,14 @@ http.createServer(async (req, res) => {
     if (AI_ROUTES.has(p) && req.method === 'POST' && !allow(req, 'ai', LIMITS.ai)) throw tooMany('requests to the rivals');
     if (p === '/api/reset' && req.method === 'POST' && !allow(req, 'season', LIMITS.season)) throw tooMany('new seasons');
     if (p === '/healthz') return send(res, 200, { ok: true, aiSpendToday: spend.usd, games: games.size, liveTables: LIVE_TABLES, liveSeated: liveSeats.filter(Boolean).length, aiInflight });
+    // the charter NFT's living image, drawn from its on-chain state
+    const card = /^\/charter\/(charter-[a-z0-9-]+)\.svg$/.exec(p);
+    if (card) {
+      const svg = await charterCard(card[1]);
+      if (!svg) return send(res, 404, { error: 'no such charter' });
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=30' });
+      return res.end(svg);
+    }
     if (p.startsWith('/api/')) {
       const g = gameFor(req, res);
       if (p === '/api/state') return send(res, 200, g.view());
