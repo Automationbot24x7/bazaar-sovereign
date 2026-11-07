@@ -145,6 +145,7 @@
     const p = stallPos(m.id), text = ((m.player ? m.cry?.text : m.bark) || m.cry?.text || '').trim();
     if (!p || !text || W < 700) return;
     stage.querySelectorAll(`.street-cry[data-id="${m.id}"]`).forEach(e => e.remove());
+    const shown = [...stage.querySelectorAll('.street-cry')]; while (shown.length >= 2) shown.shift().remove();   // two voices at a time is a street, five is noise
     const b = document.createElement('div');
     b.className = `street-cry${loud ? ' loud' : ''}`; b.dataset.id = m.id; b.textContent = text.length > 84 ? text.slice(0, 82) + '…' : text;
     b.style.left = `${p.x}px`; b.style.bottom = `${H - p.top + 12}px`; b.style.setProperty('--c', m.color);
