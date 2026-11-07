@@ -8,15 +8,15 @@
     },
     {
       "id": "s2",
-      "text": "Your house is a charter on NEAR testnet. Its wallet holds real testnet NEAR, its stock is on-chain tokens, and its record changes as the business lives or dies."
+      "text": "Your house is a charter NFT on NEAR testnet. It holds its own vault of NEAR, its stock is on-chain tokens, and its card redraws itself as the business lives or dies."
     },
     {
       "id": "s3",
-      "text": "Four rival houses think for themselves. They cry their wares to pull in shoppers, read the rumors, race you for Palace orders, and remember who insulted them."
+      "text": "Four rival houses think for themselves. They cry their wares, bring you deals of their own, race you for Palace orders, and remember who insulted them."
     },
     {
       "id": "s4",
-      "text": "Haggle with any of them. Every deal settles through an escrow contract: goods and payment move in one transaction."
+      "text": "Haggle with any of them. Your browser signs your side of the deal, their wallet signs theirs, and one transaction settles both."
     },
     {
       "id": "s5",
@@ -28,11 +28,11 @@
     },
     {
       "id": "s7",
-      "text": "Make it not worth his gold, and he leaves. Every loan, deal and takeover along the way is a real transaction."
+      "text": "Make it not worth his gold, and he leaves. Every deal, loan and takeover is a real transaction, and a charter's money goes wherever the NFT goes."
     },
     {
       "id": "s8",
-      "text": "Seize three charters, and become Sovereign of the Bazaar. <short pause> Play free at bazaar dot reconscribe dot com."
+      "text": "Seize three charters to become Sovereign, then keep your house: mint it to your own wallet. <short pause> Play free at bazaar dot reconscribe dot com."
     }
   ]
 }

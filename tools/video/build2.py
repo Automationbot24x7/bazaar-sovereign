@@ -41,15 +41,17 @@ st = lambda pre: next((f[:-4] for f in sorted(os.listdir(f'{CAP}/stills')) if f.
 EVENT = next((m for m in ('event-caravan', 'event-festival', 'event-storm', 'event-monsoon', 'event-drought') if m in marks), None)
 s3_extra = [CLIP(EVENT, 1920, (0, 0))] if EVENT else []
 wagon = [CLIP('magnate-wagon', 1920, (0, 0))] if 'magnate-wagon' in marks else []
+OFFER = st('decision-offer')
+s3_offer = [STILL(OFFER, 1280, (320, 200), (320, 230))] if os.path.exists(f'{CAP}/stills/{OFFER}.png') else [CLIP(mk('decision-palace'), 1920, (0, 0))]
 SEGMENTS = [
     ('s1', 'Every merchant is an NFT with its own wallet', [('intro',), CINE('trailer-flyin'), CLIP(RUNNING, 1920, (0, 0))]),
-    ('s2', 'A charter NFT that does something', [STILL(st('cry-verdict'), 1152, (0, 300), (768, 300)), STILL(st('inspector'), 1280, (320, 80), (320, 200))]),
-    ('s3', 'Rivals that shout, scheme and hold grudges', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1920, (0, 0)), CLIP(mk('decision-palace'), 1920, (0, 0))]),
-    ('s4', 'Atomic deals through escrow', [STILL('haggle-reply', 960, (470, 262), (490, 282)), STILL('haggle-deal', 960, (480, 266), (480, 280))]),
+    ('s2', 'A charter NFT that holds its own money', [STILL(st('cry-verdict'), 1152, (0, 300), (768, 300)), STILL(st('inspector'), 1280, (320, 80), (320, 200))]),
+    ('s3', 'Rivals that shout, scheme and make deals', [STILL(st('decision-rumor'), 1280, (300, 140), (360, 170)), CLIP('cry', 1920, (0, 0)), *s3_offer]),
+    ('s4', 'Deals settled by signed intents', [STILL('haggle-deal', 960, (480, 266), (480, 280)), STILL('intents-feed', 960, (940, 520), (940, 545))]),
     ('s5', 'Day 6: the Magnate arrives', [CINE('trailer-arrival'), STILL(st('decision-magnate'), 1440, (0, 100), (240, 140)), *wagon]),
     ('s6', 'Fight him together, or lose the bazaar', [STILL('pact-replies', 1152, (0, 96), (40, 110)), CLIP(mk('raid-d'), 1920, (0, 0)), CINE('scene-wins')]),
-    ('s7', 'Every move is on-chain', [CINE('scene-leaves'), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
-    ('s8', 'Play free: bazaar.reconscribe.com', [CINE('trailer-festival'), STILL('end-screen', 960, (480, 245), (480, 262)), ('end',)]),
+    ('s7', 'Every move is on-chain', [CINE('scene-leaves'), STILL('charter-card', 1920, (0, 0), (0, 0)), STILL('onchain-feed', 1152, (768, 420), (768, 432))]),
+    ('s8', 'Play free: bazaar.reconscribe.com', [CINE('trailer-festival'), (STILL('end-keepsake', 800, (560, 595), (560, 605)) if os.path.exists(f'{CAP}/stills/end-keepsake.png') else STILL('end-screen', 960, (480, 245), (480, 262))), ('end',)]),
 ]
 # a shot whose still or mark is missing from this capture is dropped rather than failing the build
 SEGMENTS = [(sid, cap, [sh for sh in shots if (sh[0] not in ('still', 'cine') or os.path.exists(sh[1])) and (sh[0] != 'clip' or sh[1] in marks)]) for sid, cap, shots in SEGMENTS]
