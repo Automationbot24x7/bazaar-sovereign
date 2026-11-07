@@ -18,6 +18,8 @@ Players never see a wallet popup. The chain is underneath the game loop, not in 
 4. **Press ⏩ 10 days** to jump to the magnate fight: rally the rivals into a pact (each answers in character, some ask a fee) and buy off his carts.
 5. **Press ⛓ Inspect on NEAR**: for every house it reads, live from testnet in your browser, the charter NFT and its current owner, the NFT's own vault of NEAR, the stall wallet, and its NEP-245 goods, next to what that house's AI mind is thinking right now.
 
+6. **At the end of a live season, keep your charter**: enter your own NEAR testnet account and the game mints a keepsake charter NFT of your house, with the season's final state written into it and its own living card, owned by you outright.
+
 If all three live tables are busy you get a practice table (identical game, simulated entries); a **Play on NEAR testnet** button appears as soon as a live seat frees up (seats free after 3 idle minutes).
 
 ## How it maps to the tracks
@@ -44,6 +46,7 @@ If all three live tables are busy you get a practice table (identical game, simu
 | **Goods** | Saffron, silk, tea and salt are NEP-245 multi-tokens. Buying from suppliers mints and selling to townsfolk burns (mirrored by the Vizier with `sync_goods` every 5 days and before every deal); rats burn ruined stock the same way. |
 | **Profit and loss** | Every 5 game days each house's P&L settles as a real NEAR transfer between the town treasury and its wallet (1 coin = 0.00002 NEAR). |
 | **Guild loans** | A Moneylenders' Guild bond is paid out by the treasury to the borrower's wallet; repayments (fee plus daily interest) go back wallet to treasury. |
+| **Keepsake charters** | When a live season ends, the player can have the Vizier mint a keepsake charter of their house to their **own** NEAR testnet account (`mint_charter` + `update_charters`), owned outright. |
 | **Charter sales and takeovers** | The Vizier lists a bankrupt or agreed-sale charter (`list_charter`); the buyer's own wallet calls `buy_charter` with the price attached, so payment and NFT transfer happen together, and the charter's vault now answers to its new owner. |
 
 The game server is the contract owner ("the Vizier") and acts as the market oracle. Every transaction appears in the in-game **On NEAR** feed with a NearBlocks link; signed intents appear there too (they are signed off-chain, then settled by the solver transaction).
