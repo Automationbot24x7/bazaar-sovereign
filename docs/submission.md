@@ -8,7 +8,7 @@ Deadline: **14 Nov 2026, 23:59 UTC**. Submit **once** at https://nearhackathon.c
 2. **Make the GitHub repo public**: https://github.com/Automationbot24x7/bazaar-sovereign (judges can't open a private repo; LICENSE is MIT). ✅
 3. **Upload the video** (`art-src/video/bazaar-sovereign-demo.mp4`) to the ReconScribe YouTube channel (optional, but handy for the README). ⬜
 4. **Post on X** from the ReconScribe account with the video attached (text below). Copy the post's link. ✅ https://x.com/ReconScribe/status/2118951990667710788
-5. **Fill in the form** with the answers below and the post link. ⬜
+5. **Fill in the form** with the answers below and the post link. ✅ submitted 2026-11-07
 
 ## Form answers
 
